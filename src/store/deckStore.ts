@@ -1,145 +1,198 @@
+/**
+ * Phase 2 — Deck Store (Zustand)
+ *
+ * Central state for the active deck being built.
+ * All deck mutations go through this store; the validation engine runs
+ * synchronously on every mutation and the result is always current.
+ */
+
 import { create } from "zustand";
-import { validateDeck, BASIC_LAND_NAMES } from "../lib/legality";
-import { checkCompanionRestriction } from "../lib/companion";
+import { validateDeck, type DeckEntry, type ValidationResult } from "../lib/legality";
 import type { CardRecord } from "../lib/types";
-import type { DeckEntry, ValidationResult } from "../lib/legality";
-import type { CompanionCheckResult } from "../lib/companion";
+
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+export interface Deck {
+  id: string;
+  name: string;
+  archetypeTag: string | null;
+  createdAt: string;
+  updatedAt: string;
+  notes: string;
+}
 
 export interface DeckState {
-  deckId: string | null;
-  deckName: string;
+  deck: Deck;
   entries: DeckEntry[];
   validation: ValidationResult;
-  companionCheck: CompanionCheckResult | null;
 
-  addCard: (card: CardRecord, board: "main" | "side") => void;
-  removeCard: (oracleId: string, board: "main" | "side") => void;
-  setQuantity: (oracleId: string, board: "main" | "side", qty: number) => void;
-  moveCard: (oracleId: string, from: "main" | "side", to: "main" | "side") => void;
+  // Mutations
+  setDeckMeta: (meta: Partial<Omit<Deck, "id" | "createdAt">>) => void;
+  addCard: (card: CardRecord, zone?: "mainboard" | "sideboard", quantity?: number) => void;
+  removeCard: (oracleId: string, zone: "mainboard" | "sideboard", quantity?: number) => void;
+  removeAllCopies: (oracleId: string, zone?: "mainboard" | "sideboard" | "all") => void;
+  moveToSideboard: (oracleId: string) => void;
+  moveToMainboard: (oracleId: string) => void;
+  importEntries: (entries: DeckEntry[]) => void;
   clearDeck: () => void;
-  setDeckName: (name: string) => void;
+  newDeck: (name?: string) => void;
 }
 
-function revalidate(
-  entries: DeckEntry[]
-): { validation: ValidationResult; companionCheck: CompanionCheckResult | null } {
-  const validation = validateDeck(entries);
-  const sideCards = entries
-    .filter(e => e.board === "side")
-    .flatMap(e => Array(e.quantity).fill(e.card) as CardRecord[]);
-  const mainCards = entries
-    .filter(e => e.board === "main")
-    .flatMap(e => Array(e.quantity).fill(e.card) as CardRecord[]);
-  const companionCheck = checkCompanionRestriction(sideCards, mainCards);
-  return { validation, companionCheck };
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function generateId(): string {
+  return `deck-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 }
+
+function makeDeck(name = "Untitled Deck"): Deck {
+  const now = new Date().toISOString();
+  return {
+    id: generateId(),
+    name,
+    archetypeTag: null,
+    createdAt: now,
+    updatedAt: now,
+    notes: "",
+  };
+}
+
+const EMPTY_VALIDATION: ValidationResult = {
+  legal: false,
+  mainboardCount: 0,
+  sideboardCount: 0,
+  violations: [
+    {
+      code: "MIN_60",
+      severity: "error",
+      message: "Mainboard has 0 cards. Minimum is 60.",
+    },
+  ],
+  warnings: [],
+};
+
+// ─── Store ────────────────────────────────────────────────────────────────────
 
 export const useDeckStore = create<DeckState>((set, get) => ({
-  deckId: null,
-  deckName: "New Deck",
+  deck: makeDeck(),
   entries: [],
-  validation: {
-    legal: false,
-    mainCount: 0,
-    sideCount: 0,
-    violations: [{ rule: "MIN_60", message: "Mainboard has 0 cards — minimum is 60." }]
-  },
-  companionCheck: null,
+  validation: EMPTY_VALIDATION,
 
-  addCard(card, board) {
-    const { entries } = get();
-    const existing = entries.find(e => e.card.oracleId === card.oracleId && e.board === board);
-    const isBasic = BASIC_LAND_NAMES.has(card.name);
-    const maxCopies = isBasic ? 99 : 4;
-
-    let updated: DeckEntry[];
-    if (existing) {
-      if (existing.quantity >= maxCopies) return;
-      updated = entries.map(e =>
-        e.card.oracleId === card.oracleId && e.board === board
-          ? { ...e, quantity: e.quantity + 1 }
-          : e
-      );
-    } else {
-      updated = [...entries, { card, quantity: 1, board }];
-    }
-
-    set({ entries: updated, ...revalidate(updated) });
+  setDeckMeta(meta) {
+    set((s) => ({
+      deck: { ...s.deck, ...meta, updatedAt: new Date().toISOString() },
+    }));
   },
 
-  removeCard(oracleId, board) {
-    const { entries } = get();
-    const existing = entries.find(e => e.card.oracleId === oracleId && e.board === board);
-    if (!existing) return;
-
-    let updated: DeckEntry[];
-    if (existing.quantity <= 1) {
-      updated = entries.filter(e => !(e.card.oracleId === oracleId && e.board === board));
-    } else {
-      updated = entries.map(e =>
-        e.card.oracleId === oracleId && e.board === board
-          ? { ...e, quantity: e.quantity - 1 }
-          : e
+  addCard(card, zone = "mainboard", quantity = 1) {
+    set((s) => {
+      const existing = s.entries.find(
+        (e) => e.card.oracleId === card.oracleId && e.zone === zone
       );
-    }
 
-    set({ entries: updated, ...revalidate(updated) });
+      let nextEntries: DeckEntry[];
+
+      if (existing) {
+        nextEntries = s.entries.map((e) =>
+          e.card.oracleId === card.oracleId && e.zone === zone
+            ? { ...e, quantity: e.quantity + quantity }
+            : e
+        );
+      } else {
+        nextEntries = [...s.entries, { card, quantity, zone }];
+      }
+
+      return {
+        entries: nextEntries,
+        validation: validateDeck(nextEntries),
+        deck: { ...s.deck, updatedAt: new Date().toISOString() },
+      };
+    });
   },
 
-  setQuantity(oracleId, board, qty) {
-    const { entries } = get();
-    const cardName = entries.find(e => e.card.oracleId === oracleId)?.card.name;
-    const maxCopies = cardName && BASIC_LAND_NAMES.has(cardName) ? 99 : 4;
-    const clampedQty = Math.max(0, Math.min(qty, maxCopies));
+  removeCard(oracleId, zone, quantity = 1) {
+    set((s) => {
+      const nextEntries = s.entries
+        .map((e) =>
+          e.card.oracleId === oracleId && e.zone === zone
+            ? { ...e, quantity: e.quantity - quantity }
+            : e
+        )
+        .filter((e) => e.quantity > 0);
 
-    let updated: DeckEntry[];
-    if (clampedQty === 0) {
-      updated = entries.filter(e => !(e.card.oracleId === oracleId && e.board === board));
-    } else {
-      const exists = entries.some(e => e.card.oracleId === oracleId && e.board === board);
-      if (!exists) return;
-      updated = entries.map(e =>
-        e.card.oracleId === oracleId && e.board === board
-          ? { ...e, quantity: clampedQty }
-          : e
-      );
-    }
-
-    set({ entries: updated, ...revalidate(updated) });
+      return {
+        entries: nextEntries,
+        validation: validateDeck(nextEntries),
+        deck: { ...s.deck, updatedAt: new Date().toISOString() },
+      };
+    });
   },
 
-  moveCard(oracleId, from, to) {
-    const { entries } = get();
-    const entry = entries.find(e => e.card.oracleId === oracleId && e.board === from);
-    if (!entry) return;
+  removeAllCopies(oracleId, zone = "all") {
+    set((s) => {
+      const nextEntries = s.entries.filter(
+        (e) =>
+          !(e.card.oracleId === oracleId && (zone === "all" || e.zone === zone))
+      );
 
-    const withoutSource = entries.filter(
-      e => !(e.card.oracleId === oracleId && e.board === from)
-    );
-    const destExisting = withoutSource.find(e => e.card.oracleId === oracleId && e.board === to);
-    const isBasic = BASIC_LAND_NAMES.has(entry.card.name);
-    const maxCopies = isBasic ? 99 : 4;
+      return {
+        entries: nextEntries,
+        validation: validateDeck(nextEntries),
+        deck: { ...s.deck, updatedAt: new Date().toISOString() },
+      };
+    });
+  },
 
-    let updated: DeckEntry[];
-    if (destExisting) {
-      updated = withoutSource.map(e =>
-        e.card.oracleId === oracleId && e.board === to
-          ? { ...e, quantity: Math.min(e.quantity + entry.quantity, maxCopies) }
+  moveToSideboard(oracleId) {
+    set((s) => {
+      const nextEntries = s.entries.map((e) =>
+        e.card.oracleId === oracleId && e.zone === "mainboard"
+          ? { ...e, zone: "sideboard" as const }
           : e
       );
-    } else {
-      updated = [...withoutSource, { ...entry, board: to }];
-    }
+      return {
+        entries: nextEntries,
+        validation: validateDeck(nextEntries),
+        deck: { ...s.deck, updatedAt: new Date().toISOString() },
+      };
+    });
+  },
 
-    set({ entries: updated, ...revalidate(updated) });
+  moveToMainboard(oracleId) {
+    set((s) => {
+      const nextEntries = s.entries.map((e) =>
+        e.card.oracleId === oracleId && e.zone === "sideboard"
+          ? { ...e, zone: "mainboard" as const }
+          : e
+      );
+      return {
+        entries: nextEntries,
+        validation: validateDeck(nextEntries),
+        deck: { ...s.deck, updatedAt: new Date().toISOString() },
+      };
+    });
+  },
+
+  importEntries(entries) {
+    set((s) => ({
+      entries,
+      validation: validateDeck(entries),
+      deck: { ...s.deck, updatedAt: new Date().toISOString() },
+    }));
   },
 
   clearDeck() {
-    const entries: DeckEntry[] = [];
-    set({ entries, ...revalidate(entries) });
+    set((s) => ({
+      entries: [],
+      validation: EMPTY_VALIDATION,
+      deck: { ...s.deck, updatedAt: new Date().toISOString() },
+    }));
   },
 
-  setDeckName(name) {
-    set({ deckName: name });
-  }
+  newDeck(name) {
+    set({
+      deck: makeDeck(name),
+      entries: [],
+      validation: EMPTY_VALIDATION,
+    });
+  },
 }));

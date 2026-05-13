@@ -1,57 +1,78 @@
-import { db } from "./db";
-import type { CardRecord } from "./types";
+/**
+ * Phase 1+2 — Set metadata utilities
+ *
+ * Derives Standard-legal set information from the cards already stored in
+ * IndexedDB. Scryfall doesn't include a separate sets table in the oracle_cards
+ * bulk file, so we reconstruct set metadata from the card records themselves.
+ */
 
-export interface SetInfo {
-  code: string;
-  name: string;
+import { db } from "./db";
+
+export interface SetMeta {
+  setCode: string;
+  setName: string;
+  setType: string | null;
   cardCount: number;
 }
 
+export interface DbStats {
+  cardCount: number;
+  lastImportedAt: string | null;
+  setCount: number;
+}
+
 /**
- * Derives Standard set metadata directly from the cards table.
- * Phase 2 can enrich with release dates from Scryfall set objects.
+ * Returns all distinct Standard-legal sets derived from the card records.
  */
-export async function getStandardSets(): Promise<SetInfo[]> {
+export async function getStandardSets(): Promise<SetMeta[]> {
   const cards = await db.cards
     .where("legalityStandard")
     .equals("legal")
     .toArray();
 
-  const map = new Map<string, SetInfo>();
+  const map = new Map<string, SetMeta>();
+
   for (const card of cards) {
     const existing = map.get(card.setCode);
     if (existing) {
       existing.cardCount++;
     } else {
       map.set(card.setCode, {
-        code: card.setCode,
-        name: card.setName,
+        setCode: card.setCode,
+        setName: card.setName,
+        setType: card.setType,
         cardCount: 1,
       });
     }
   }
 
   return Array.from(map.values()).sort((a, b) =>
-    a.name.localeCompare(b.name)
+    a.setName.localeCompare(b.setName)
   );
 }
 
 /**
- * Cards whose legalityFuture = "legal" but not yet Standard-legal.
- * Surfaced under the "Coming Soon" toggle in the UI.
+ * Returns all cards with legalityFuture === 'legal' (Coming Soon).
  */
-export async function getFutureCards(): Promise<CardRecord[]> {
+export async function getFutureCards() {
   return db.cards.where("legalityFuture").equals("legal").toArray();
 }
 
-export async function getDbStats(): Promise<{
-  cardCount: number;
-  lastImportedAt: string | null;
-}> {
-  const countMeta = await db.meta.get("cardCount");
-  const tsMeta = await db.meta.get("lastImportedAt");
+/**
+ * Returns high-level DB stats for the status bar.
+ */
+export async function getDbStats(): Promise<DbStats> {
+  const [cardCount, metaRows, sets] = await Promise.all([
+    db.cards.count(),
+    db.meta.toArray(),
+    getStandardSets(),
+  ]);
+
+  const lastImportedAtRow = metaRows.find((r) => r.key === "lastImportedAt");
+
   return {
-    cardCount: Number(countMeta?.value ?? 0),
-    lastImportedAt: tsMeta?.value ?? null,
+    cardCount,
+    lastImportedAt: lastImportedAtRow?.value ?? null,
+    setCount: sets.length,
   };
 }
