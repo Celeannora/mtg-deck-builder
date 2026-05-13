@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { DeckStatsBar } from "./DeckStatsBar";
 import { ManaCurveChart } from "./ManaCurveChart";
 import { ManaBasePanel } from "./ManaBasePanel";
@@ -11,9 +11,7 @@ import { CollectionPanel } from "./CollectionPanel";
 import { DeckHistoryPanel } from "./DeckHistoryPanel";
 import { MetagamePanel } from "./MetagamePanel";
 import { DeckExportPanel } from "./DeckExportPanel";
-import { useDeckStore } from "../store/deckStore";
-import { db } from "../lib/db";
-import type { CardRecord } from "../lib/types";
+import { useDeckStore, useMainboardEntries, useSideboardEntries } from "../store/deckStore";
 import type { DeckSnapshot } from "../lib/deckHistory";
 
 type Tab =
@@ -36,54 +34,38 @@ const TABS: { id: Tab; label: string }[] = [
 
 interface Props {
   activeDeckId: string;
-  onSwUpdateReady?: () => void;
 }
 
-export function RightPanel({ activeDeckId, onSwUpdateReady }: Props) {
+export function RightPanel({ activeDeckId }: Props) {
   const [tab, setTab] = useState<Tab>("curve");
-  const { mainboard, sideboard, deckName } = useDeckStore();
 
-  // Resolved CardRecord arrays for panels that need them
-  const [mainCards, setMainCards]   = useState<CardRecord[]>([]);
-  const [sideCards, setSideCards]   = useState<CardRecord[]>([]);
+  const mainEntries = useMainboardEntries();
+  const sideEntries = useSideboardEntries();
+  const deckName    = useDeckStore(s => s.deckName);
+  const loadFromSnapshot = useDeckStore(s => s.loadFromSnapshot);
 
-  useEffect(() => {
-    if (!mainboard || Object.keys(mainboard).length === 0) { setMainCards([]); return; }
-    const ids = Object.keys(mainboard);
-    db.cards.where("oracleId").anyOf(ids).toArray().then(setMainCards);
-  }, [JSON.stringify(mainboard)]);
-
-  useEffect(() => {
-    if (!sideboard || Object.keys(sideboard).length === 0) { setSideCards([]); return; }
-    const ids = Object.keys(sideboard);
-    db.cards.where("oracleId").anyOf(ids).toArray().then(setSideCards);
-  }, [JSON.stringify(sideboard)]);
-
-  // SW update event listener
-  useEffect(() => {
-    const handler = () => onSwUpdateReady?.();
-    window.addEventListener("sw-update-ready", handler);
-    return () => window.removeEventListener("sw-update-ready", handler);
-  }, [onSwUpdateReady]);
+  // CardRecord arrays — derived directly from entries (no extra Dexie fetch)
+  const mainCards = useMemo(() => mainEntries.map(e => e.card), [mainEntries]);
+  const sideCards = useMemo(() => sideEntries.map(e => e.card), [sideEntries]);
 
   const deckCards = useMemo(() =>
-    mainCards.map((c) => ({
-      oracleId: c.oracleId,
-      name: c.name,
-      quantity: mainboard?.[c.oracleId] ?? 1,
-      priceUsd: c.priceUsd,
+    mainEntries.map(e => ({
+      oracleId: e.card.oracleId,
+      name:     e.card.name,
+      quantity: e.quantity,
+      priceUsd: e.card.priceUsd,
     })),
-    [mainCards, mainboard]
+    [mainEntries]
   );
 
   const exportDeck = useMemo(() => ({
-    name: deckName ?? "Untitled Deck",
-    mainboard: mainCards.map((c) => ({ quantity: mainboard?.[c.oracleId] ?? 1, card: c })),
-    sideboard: sideCards.map((c) => ({ quantity: sideboard?.[c.oracleId] ?? 1, card: c })),
-  }), [mainCards, sideCards, mainboard, sideboard, deckName]);
+    name:      deckName,
+    mainboard: mainEntries.map(e => ({ quantity: e.quantity, card: e.card })),
+    sideboard: sideEntries.map(e => ({ quantity: e.quantity, card: e.card })),
+  }), [mainEntries, sideEntries, deckName]);
 
   const handleRestore = (snapshot: DeckSnapshot) => {
-    useDeckStore.getState().loadFromSnapshot?.({
+    loadFromSnapshot({
       name: snapshot.name,
       main: Object.entries(snapshot.mainboard).map(([id, q]) => [q, id]),
       side: Object.entries(snapshot.sideboard).map(([id, q]) => [q, id]),
@@ -91,8 +73,7 @@ export function RightPanel({ activeDeckId, onSwUpdateReady }: Props) {
   };
 
   const handleFork = (newId: string) => {
-    // Switch active deck — store update handled externally if needed
-    console.info("Forked to deck:", newId);
+    console.info("Forked to new deck id:", newId);
   };
 
   return (
@@ -123,7 +104,9 @@ export function RightPanel({ activeDeckId, onSwUpdateReady }: Props) {
         {tab === "validate"   && <ValidationPanel />}
         {tab === "gameplan"   && <GamePlanSummary />}
         {tab === "bo3"        && <Bo3Panel deckId={activeDeckId} />}
-        {tab === "sideboard"  && <SideboardPlanPanel mainboard={mainCards} sideboard={sideCards} />}
+        {tab === "sideboard"  && (
+          <SideboardPlanPanel mainboard={mainCards} sideboard={sideCards} />
+        )}
         {tab === "collection" && <CollectionPanel deckCards={deckCards} />}
         {tab === "history"    && (
           <DeckHistoryPanel

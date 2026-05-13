@@ -1,11 +1,20 @@
 import { create } from "zustand";
 import { validateDeck, BASIC_LAND_NAMES } from "../lib/legality";
 import { checkCompanionRestriction } from "../lib/companion";
+import { db } from "../lib/db";
 import type { CardRecord } from "../lib/types";
 import type { DeckEntry, ValidationResult } from "../lib/legality";
 import type { CompanionCheckResult } from "../lib/companion";
 
+// Decoded shape from decodeShareableLink
+export interface ShareableDecoded {
+  name: string;
+  main: [number, string][]; // [quantity, oracleId]
+  side: [number, string][];
+}
+
 export interface DeckState {
+  activeDeckId: string;
   deckId: string | null;
   deckName: string;
   entries: DeckEntry[];
@@ -18,6 +27,11 @@ export interface DeckState {
   moveCard: (oracleId: string, from: "main" | "side", to: "main" | "side") => void;
   clearDeck: () => void;
   setDeckName: (name: string) => void;
+  loadFromSnapshot: (decoded: ShareableDecoded) => Promise<void>;
+}
+
+function makeId(): string {
+  return `deck_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
 }
 
 function revalidate(
@@ -35,6 +49,7 @@ function revalidate(
 }
 
 export const useDeckStore = create<DeckState>((set, get) => ({
+  activeDeckId: makeId(),
   deckId: null,
   deckName: "New Deck",
   entries: [],
@@ -63,7 +78,6 @@ export const useDeckStore = create<DeckState>((set, get) => ({
     } else {
       updated = [...entries, { card, quantity: 1, board }];
     }
-
     set({ entries: updated, ...revalidate(updated) });
   },
 
@@ -82,7 +96,6 @@ export const useDeckStore = create<DeckState>((set, get) => ({
           : e
       );
     }
-
     set({ entries: updated, ...revalidate(updated) });
   },
 
@@ -104,7 +117,6 @@ export const useDeckStore = create<DeckState>((set, get) => ({
           : e
       );
     }
-
     set({ entries: updated, ...revalidate(updated) });
   },
 
@@ -130,16 +142,48 @@ export const useDeckStore = create<DeckState>((set, get) => ({
     } else {
       updated = [...withoutSource, { ...entry, board: to }];
     }
-
     set({ entries: updated, ...revalidate(updated) });
   },
 
   clearDeck() {
     const entries: DeckEntry[] = [];
-    set({ entries, ...revalidate(entries) });
+    set({ entries, activeDeckId: makeId(), ...revalidate(entries) });
   },
 
   setDeckName(name) {
     set({ deckName: name });
-  }
+  },
+
+  async loadFromSnapshot(decoded: ShareableDecoded) {
+    const allPairs = [
+      ...decoded.main.map(([q, id]) => ({ q, id, board: "main" as const })),
+      ...decoded.side.map(([q, id]) => ({ q, id, board: "side" as const })),
+    ];
+
+    const oracleIds = allPairs.map(p => p.id);
+    const cards = await db.cards.where("oracleId").anyOf(oracleIds).toArray();
+    const cardMap = new Map(cards.map(c => [c.oracleId, c]));
+
+    const entries: DeckEntry[] = [];
+    for (const { q, id, board } of allPairs) {
+      const card = cardMap.get(id);
+      if (card) entries.push({ card, quantity: q, board });
+    }
+
+    set({
+      entries,
+      deckName: decoded.name,
+      activeDeckId: makeId(),
+      ...revalidate(entries),
+    });
+  },
 }));
+
+// Selector hooks — derive mainboard/sideboard views from entries
+export function useMainboardEntries() {
+  return useDeckStore(s => s.entries.filter(e => e.board === "main"));
+}
+
+export function useSideboardEntries() {
+  return useDeckStore(s => s.entries.filter(e => e.board === "side"));
+}
