@@ -1,22 +1,45 @@
 import { useEffect, useState } from "react";
-import { db } from "../lib/db";
+import { db, getDatabaseStatus } from "../lib/db";
+import type { DatabaseStatus } from "../lib/types";
 
 export function useDBStatus() {
-  const [isReady, setIsReady]     = useState(false);
-  const [cardCount, setCardCount] = useState(0);
+  const [status, setStatus] = useState<DatabaseStatus>({
+    cardCount: 0,
+    setCount: 0,
+    lastImportedAt: null,
+    isStale: true,
+    isEmpty: true,
+  });
+
+  async function refresh() {
+    try {
+      const s = await getDatabaseStatus();
+      setStatus(s);
+    } catch {
+      // DB not yet open
+    }
+  }
 
   useEffect(() => {
-    let mounted = true;
-    (async () => {
-      try {
-        const count = await db.cards.count();
-        if (mounted) { setCardCount(count); setIsReady(count > 0); }
-      } catch {
-        if (mounted) setIsReady(false);
-      }
-    })();
-    return () => { mounted = false; };
+    refresh();
+
+    // Re-check whenever the cards table changes (after import)
+    const sub = db.cards.hook("creating", () => {
+      setTimeout(refresh, 500);
+    });
+
+    return () => {
+      db.cards.hook("creating").unsubscribe(sub as never);
+    };
   }, []);
 
-  return { isReady, cardCount };
+  return {
+    isReady: !status.isEmpty,
+    cardCount: status.cardCount,
+    setCount: status.setCount,
+    lastImportedAt: status.lastImportedAt,
+    isStale: status.isStale,
+    isEmpty: status.isEmpty,
+    refresh,
+  };
 }

@@ -5,263 +5,170 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
-## [Unreleased] — Active Development (Session: 2026-05-12)
+## [Unreleased] — Active Development
 
-> This project is being built iteratively in a Perplexity AI chat session.
-> Each "Phase" below maps to a discrete code-generation block.
-> Commit this file at the end of every session to preserve context.
+> Built iteratively in a Perplexity AI chat session.
+> Each "Phase" maps to a discrete code-generation block.
 
 ---
 
-## Phase 1 — Data Foundation (Complete)
+## Phase 1 — Data Foundation (✅ Complete — 2026-05-13)
 
-### Spec Origin
-The full product specification is stored in `new-2.txt` (attached to the original
-chat session). Key decisions made during planning:
-- **Local-first ingestion**: Phase 1 uses a local `oracle_cards.json` file from
-  Scryfall bulk-data, NOT runtime API discovery (corrected from original spec).
-- **Stack**: React + TypeScript + Vite + Dexie (IndexedDB) on the client side.
-- **No server**: Pure static SPA. All data lives in IndexedDB.
+### Summary
+Full local-first card ingestion pipeline. Parses Scryfall `oracle_cards.json`,
+filters to Standard-legal cards, extracts sets, persists to IndexedDB via Dexie,
+and surfaces a live status bar. Supports both local file picker and network download.
 
-### Files Added — Round 1
+### Files
 
 | File | Purpose |
 |---|---|
-| `src/lib/types.ts` | Full TypeScript type surface: `ScryfallCard`, `ScryfallCardFace`, `CardRecord`, `ImportProgress`, `ImportResult`, `ScryfallSet`, `DatabaseStatus` |
-| `src/lib/db.ts` | Dexie schema v2: `cards`, `cardSets`, `userDecks`, `deckVersions`, `metaSnapshots`, `meta` tables. `replaceAllCards()` transaction. `getDatabaseStatus()`. `isDatabaseStale()`. `saveDeck()` with 20-version history. `getDeckVersions()`. |
-| `src/lib/scryfall.ts` | `isStandardEligible()` filter (lang=en, legality=legal, excludes tokens/memorabilia/minigame/scheme/vanguard). `toCardRecord()` mapper. `getNormalImage()` (handles DFC). `extractSetsFromCards()`. `toSetRecord()`. |
-| `src/lib/scryfallApi.ts` | `discoverOracleCardsDumpUri()` — fetches Scryfall bulk-data index, finds `oracle_cards` entry, returns `downloadUri + updatedAt + sizeBytes`. |
-| `src/workers/importWorker.ts` | Dedicated Web Worker. Accepts `File` (local picker) OR `{ url: string }` (network). XHR-based download with per-percent progress. JSON parse → filter → transform loop with 5000-card progress ticks. Calls `replaceAllCards()`. Posts `progress / done / error` messages. |
-| `src/components/BulkImporter.tsx` | React component. Mode toggle (local file / network). File picker input. Network path calls `discoverOracleCardsDumpUri()` then posts URL to worker. Live progress bar with `aria-progressbar`. Import result summary (`<dl>`). Error display. Staleness guard with confirm dialog. |
-| `src/components/DatabaseStatusBar.tsx` | Persistent top bar. Shows card count, set count, last-imported timestamp. Amber "may be outdated" badge if >12h stale. "↻ Refresh Database" button. Scryfall attribution link. |
+| `src/lib/types.ts` | `ScryfallCard`, `ScryfallCardFace`, `CardRecord`, `SetRecord`, `DatabaseStatus`, `ImportProgress`, `ImportResult`, `ScryfallBulkDataEntry` |
+| `src/lib/db.ts` | Dexie v2 schema: `cards`, `cardSets`, `userDecks`, `deckVersions`, `meta`. `replaceAllCards()` (transaction). `getDatabaseStatus()`. `isDatabaseStale()`. `saveDeck()` with 20-version history. `getDeckVersions()`. |
+| `src/lib/scryfall.ts` | `isStandardEligible()` filter. `toCardRecord()` mapper (handles DFC, price, searchText). `extractSetsFromCards()`. |
+| `src/lib/scryfallApi.ts` | `discoverOracleCardsDumpUri()` — fetches Scryfall bulk-data index, finds `oracle_cards` entry, returns `{ downloadUri, updatedAt, sizeBytes }`. |
+| `src/lib/search.ts` | `searchCards()` — full filter/sort/paginate over IndexedDB cards. `getDistinctKeywords()`. `getStandardSets()`. |
+| `src/workers/importWorker.ts` | Web Worker. Accepts `File` (local) OR `{ url: string }` (network/XHR with per-byte progress). Filter → transform → set extraction → `replaceAllCards()`. Posts `progress / done / error`. |
+| `src/components/BulkImporter.tsx` | Import UI. Mode toggle (local / network). File picker. Network path calls `discoverOracleCardsDumpUri()`. Live `aria-progressbar`. Import result `<dl>`. Error display. |
+| `src/components/DatabaseStatusBar.tsx` | Slim status bar: card count, set count, last-imported date. Amber "May be outdated" badge + Refresh button if >12 h stale. Auto-refreshes every 60 s. |
+| `src/hooks/useDBStatus.ts` | `useDBStatus()` — reactive DB status hook. Fires on mount and re-fires after `cards` table writes. Returns `{ isReady, cardCount, setCount, lastImportedAt, isStale, isEmpty, refresh }`. |
+| `src/components/Header.tsx` | App header with SVG logo, view toggle (Builder / Import Data), Scryfall attribution. |
+| `src/App.tsx` | Root component. Routes between import view (empty DB) and 3-panel builder. Mounts `DatabaseStatusBar`. Passes `refresh` to `BulkImporter.onImportDone`. |
 
-### Schema (Dexie v2)
-
-```
-cards          — id (PK), oracleId, name, cmc, legalityStandard, legalityFuture,
-                 bannedInStandard, setCode, setName, rarity, importedAt, typeLine
-cardSets       — code (PK), name, releaseDate, setType, importedAt
-userDecks      — id (PK), archetypeTag, createdAt, updatedAt
-                 mainboardJson, sideboardJson, notes, metaTier, winRate, pinnedCardIds
-deckVersions   — ++id (auto PK), deckId, mainboardJson, sideboardJson, savedAt
-metaSnapshots  — ++id (auto PK), timestamp, sourceUrl, archetypeDataJson
-meta           — key (PK), value  [lastImportedAt, cardCount, setCount]
-```
-
-### CardRecord Fields
+### Dexie Schema (v2)
 
 ```
-id, oracleId, name, lang, layout, cardFacesJson
-manaCost, cmc, colorsJson, colorIdentityJson
-typeLine, oracleText, keywordsJson
-power, toughness, loyalty, producedManaJson
-legalityStandard, legalityFuture, bannedInStandard
-setCode, setName, setType, collectorNumber, rarity
-imageNormal, priceUsd, priceUsdFoil, priceEur
-edhrecRank, gameChanger, flavorText, artist
-searchText (denormalized lowercase for FTS), importedAt
+cards        — id (PK), oracleId, name, cmc, legalityStandard, legalityFuture,
+               bannedInStandard, setCode, setName, rarity, releasedAt, imageNormal, importedAt, typeLine
+cardSets     — code (PK), name, releaseDate, setType, importedAt
+userDecks    — id (PK), archetypeTag, createdAt, updatedAt
+deckVersions — ++id (auto PK), deckId, savedAt
+meta         — key (PK), value  [lastImportedAt, cardCount, setCount]
 ```
 
 ### Standard Eligibility Filter
 - `lang === "en"`
 - `legalities.standard === "legal"`
-- `type_line` does NOT contain: Token, Scheme, Vanguard, Conspiracy, Art Series
+- `type_line` NOT containing: Token, Scheme, Vanguard, Conspiracy, Art Series
 - `set_type` NOT IN: token, memorabilia, minigame
 
----
+### CardRecord Fields Added vs Previous
+- `releasedAt` — from `card.released_at` (needed for rotation engine in Phase 2)
+- `setsExtracted` on `ImportResult`
 
-## Phase 2 — Format Legality Engine (Complete)
+### Key Decisions
 
-### Files Added
-
-| File | Purpose |
+| Decision | Rationale |
 |---|---|
-| `src/lib/legality.ts` | Full Standard legality validator. |
-| `src/components/LegalityPanel.tsx` | Persistent rule-checklist UI panel. |
-| `src/lib/legality.test.ts` | Vitest unit tests — 9 test cases covering all rules. |
-
-### Legality Rules Implemented
-
-| Rule | Code | Behaviour |
-|---|---|---|
-| Minimum 60 mainboard cards | `BELOW_60` | Hard violation |
-| More than 60 cards | `ABOVE_60_WARN` | Warning only (legal) |
-| Over 4 copies (by oracleId) | `OVER_4_COPIES` | Hard violation; basics exempt |
-| Card not Standard-legal | `ILLEGAL_CARD` | Hard violation |
-| Banned card | `BANNED_CARD` | Hard violation |
-| Sideboard not 0 or 15 | `SIDEBOARD_SIZE` | Hard violation |
-| Companion restriction violated | `COMPANION_RESTRICTION` | Hard violation |
-
-### Companion Restrictions Encoded
-- **Lurrus of the Dream-Den**: all non-land permanents CMC ≤ 2
-- **Yorion, Sky Nomad**: starting deck ≥ 80 cards
-- **Kaheera, the Orphanguard**: all non-land creatures are Cat/Elemental/Nightmare/Dinosaur/Beast
-- **Umori, the Collector**: all non-land cards share a card type
-
-### Rotation Warning System
-- Checks `cardSets.releaseDate` for every card in the deck
-- Cards from sets ≤ 90 days from their 730-day (2-year) rotation window
-  generate `RotationWarning` entries (not violations — advisory only)
-- Displayed in `LegalityPanel` with days-until-rotation and set name
-
-### LegalityResult Shape
-```typescript
-{
-  isLegal: boolean
-  violations: LegalityViolation[]   // hard failures
-  warnings: LegalityViolation[]     // advisory
-  mainboardCount: number
-  sideboardCount: number
-  rotationWarnings: RotationWarning[]
-}
-```
-
-### Test Coverage (Phase 2)
-- ✅ Legal 60-card deck passes
-- ✅ 59-card deck fails BELOW_60
-- ✅ 64-card basic-land deck warns ABOVE_60_WARN (still legal)
-- ✅ 5 copies of a non-basic fails OVER_4_COPIES
-- ✅ 8 copies of basic land passes (exempt from 4-copy rule)
-- ✅ Banned card fails BANNED_CARD
-- ✅ 10-card sideboard fails SIDEBOARD_SIZE
-- ✅ 0-card sideboard passes
-- ✅ 15-card sideboard passes
-- ✅ Lurrus companion violation detected
+| Local file picker as primary mode | Avoids CORS, works offline, fastest startup |
+| XHR (not fetch) for network download | `onprogress` events unavailable on fetch streams in Workers |
+| Dexie v2 schema bump | Added `cardSets`, `userDecks`, `deckVersions`, `releasedAt` index |
+| `oracleId` for deduplication | Multiple printings share oracle ID; 4-copy rule is per oracle |
+| `searchText` denormalized field | Enables fast substring search without FTS extension |
+| `extractSetsFromCards()` in scryfall.ts | Sets derived from card data — no separate Scryfall sets API needed |
+| `useDBStatus` re-fires on `cards` write hook | Avoids polling; status updates automatically after import |
 
 ---
 
-## Phase 3 — Mana Base Calculator (In Progress)
+## Phase 2 — Format Legality Engine (⚠️ Partially committed — needs audit)
 
-> See next session continuation or `src/lib/mana.ts` when committed.
+> `legality.ts` and `ValidationPanel.tsx` are present in the repo but were
+> not formally documented when committed. `legality.test.ts` is missing.
+> Full Phase 2 CHANGELOG entry to be written when the audit pass is complete.
 
-### Planned
-- Pip parser: extract `{W}`, `{U}`, `{B}`, `{R}`, `{G}`, `{C}`, `{X}`, `{2/W}`, `{W/U}` etc.
-- Land slot recommendation: Frank Karsten formula per color
-- Mana curve histogram data (CMC 0–7+)
-- On-curve probability (hypergeometric): P(≥1 of card | hand=7, turn=T)
-- Sequencing advisor: flags turn-1 gaps, double-pip requirements, CIPT lands
-- `ManaBasePanel` component: curve chart + land counts + pip breakdown
+### Files Present (undocumented at time of audit)
+- `src/lib/legality.ts`
+- `src/lib/companion.ts`
+- `src/lib/rotation.ts`
+- `src/components/ValidationPanel.tsx`
 
----
-
-## Phase 4 — Archetype Engine (Planned)
-
-- Tag cards with role buckets: removal, draw, threat, ramp, disruption, finisher
-- Detect archetype (aggro/midrange/control/combo) from mainboard composition
-- Auto-suggest role gaps
+### Files Missing
+- `src/lib/legality.test.ts` — referenced in original CHANGELOG, never committed
 
 ---
 
-## Phase 5 — 3-Panel UI Shell (Planned)
+## Phase 3 — Mana Base Calculator (⚠️ Partially committed — undocumented)
 
-- Left: card search + filter panel
-- Center: deck builder (mainboard + sideboard zones, drag-and-drop)
-- Right: stats sidebar (legality + mana base + curve)
-- Persistent layout, resizable panels
+> Files present but not formally documented.
 
----
-
-## Phase 6 — AI Construction Assistant (Planned)
-
-- Prompt builder feeding deck context to LLM
-- Suggest cuts, fills, sideboard tech
-- Explain meta reasoning
+### Files Present
+- `src/lib/manaBase.ts`
+- `src/lib/manaBaseStore.ts`
+- `src/lib/colorDistribution.ts`
+- `src/components/ManaBasePanel.tsx`
+- `src/components/ManaCurveChart.tsx`
 
 ---
 
-## Phase 7 — Metagame Engine (Planned)
+## Phase 4 — Archetype Engine (⚠️ Partially committed — undocumented)
 
-- Ingest MTGO/tournament JSON
-- Archetype frequency tracking
-- Matchup matrix
-- Card prevalence by archetype
-
----
-
-## Phase 8 — Import / Export (Planned)
-
-- Import: Arena format, MTGO format, Moxfield URL
-- Export: Arena clipboard, MTGO .dek, JSON
-- Deck image export (card grid PNG)
+### Files Present
+- `src/lib/archetype.ts`
+- `src/lib/roles.ts`
+- `src/lib/synergy.ts`
+- `src/components/ArchetypePanel.tsx`
 
 ---
 
-## Phase 9 — Bo3 Competitive Mode (Planned)
+## Phase 5 — 3-Panel UI Shell (⚠️ Partially committed — undocumented)
 
-- Sideboard planner: 15 slots mapped to matchups
-- Bring-in / take-out guide per archetype
-- Post-board win-rate tracking
-
----
-
-## Phase 10 — Tech Architecture / Tests (Planned)
-
-- Vitest full suite for all lib modules
-- Playwright E2E for import → build → validate flow
-- Lighthouse CI budget: LCP < 2s, CLS < 0.1
+### Files Present
+- `src/components/CardSearchPanel.tsx`
+- `src/components/CardDetailDrawer.tsx`
+- `src/components/DeckPanel.tsx`
+- `src/components/DeckStatsBar.tsx`
+- `src/components/RightPanel.tsx`
+- `src/store/deckStore.ts`
 
 ---
 
-## Phase 11 — Competitive Intelligence (Planned)
+## Phase 6 — AI Construction Assistant (⚠️ Partially committed — undocumented)
 
-- "Beat the meta" mode
-- Hate card suggestions per meta archetype
-- Tournament prep checklist
+### Files Present
+- `src/lib/buildWizard.ts`
+- `src/lib/budgetOptimizer.ts`
+- `src/lib/comboFinder.ts`
+- `src/lib/optimizeEngine.ts`
+- `src/lib/deckComposition.ts`
+- `src/lib/powerScore.ts`
+- `src/lib/powerSignal.ts`
+- `src/lib/similarCards.ts`
+- `src/lib/suggestions.ts`
+- `src/lib/whatsMissing.ts`
+- `src/components/AdvisorPanel.tsx`
+- `src/components/GamePlanSummary.tsx`
+- `src/components/SuggestionPanel.tsx`
 
 ---
 
-## Phase 12 — Final Integration (Planned)
-
-- Complete 3-panel wiring
-- Mobile layout
-- Onboarding flow (first-run bulk import wizard)
-- PWA manifest + service worker for offline use
+## Phase 7 — Metagame Engine (⬜ Planned)
+## Phase 8 — Import / Export (⬜ Planned)
+## Phase 9 — Bo3 Competitive Mode (⬜ Planned)
+## Phase 10 — Tests + CI (⬜ Planned)
+## Phase 11 — Competitive Intelligence (⬜ Planned)
+## Phase 12 — Final Integration + PWA (⬜ Planned)
 
 ---
 
 ## Session Notes
 
-### Key Decisions Log
-
-| Decision | Rationale |
-|---|---|
-| Local file picker (not runtime fetch) for Phase 1 | Avoids CORS, faster startup, offline-capable |
-| Dexie over raw IndexedDB | Transaction safety, typed tables, bulk operations |
-| Web Worker for import | Keeps UI thread unblocked during 300k+ card parse |
-| `oracleId` for deduplication | Multiple printings share an oracle ID; 4-copy rule is per oracle |
-| `searchText` denormalized field | Enables fast substring search without FTS extension |
-| Rotation warning at 90 days | Gives players time to pivot before GP/RCQ seasons |
-| No `localStorage` / `sessionStorage` | Sandboxed iframe environment blocks storage access |
-
 ### Tech Stack
 
 ```
-Framework:    React 18 + TypeScript
-Build:        Vite
-DB:           Dexie 3 (IndexedDB)
-Styling:      Tailwind CSS v4
-Icons:        Lucide React
-Charts:       Chart.js (Phase 3+)
-Workers:      Native Web Workers (type:module)
-Tests:        Vitest
-E2E:          Playwright (Phase 10)
+Framework:  React 18 + TypeScript
+Build:      Vite
+DB:         Dexie 3 (IndexedDB)
+Styling:    Tailwind CSS v4
+State:      Zustand (deck store)
+Icons:      Lucide React
+Charts:     Chart.js (Phase 3+)
+Workers:    Native Web Workers (type:module)
+Tests:      Vitest
+E2E:        Playwright (Phase 10)
 ```
 
-### File Map (current)
+### Undocumented Python Implementation
 
-```
-src/
-  lib/
-    types.ts          — all TypeScript interfaces
-    db.ts             — Dexie schema + CRUD helpers
-    scryfall.ts       — card transformation + eligibility
-    scryfallApi.ts    — bulk-data endpoint discovery
-    legality.ts       — Standard rules engine
-    legality.test.ts  — Vitest unit tests
-  workers/
-    importWorker.ts   — File/network import Web Worker
-  components/
-    BulkImporter.tsx      — import UI (file + network)
-    DatabaseStatusBar.tsx — persistent status bar
-    LegalityPanel.tsx     — violation + warning display
-```
+A parallel Python implementation exists at the repo root (`main.py`,
+`requirements.txt`, `core/`, `ui/`). It is NOT part of the canonical
+TypeScript build. Decision pending: document, branch, or remove.

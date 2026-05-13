@@ -1,4 +1,4 @@
-import type { CardRecord, ScryfallCard, ScryfallCardFace } from "./types";
+import type { CardRecord, ScryfallCard, ScryfallCardFace, SetRecord } from "./types";
 
 const EXCLUDED_SET_TYPES = new Set(["token", "memorabilia", "minigame"]);
 const EXCLUDED_TYPE_TERMS = [
@@ -82,7 +82,6 @@ export function toCardRecord(
     lang: card.lang,
     layout: card.layout,
     cardFacesJson: card.card_faces ? JSON.stringify(card.card_faces) : null,
-
     manaCost: card.mana_cost ?? null,
     cmc: Number(card.cmc ?? 0),
     colorsJson: safeJson(colors),
@@ -94,28 +93,42 @@ export function toCardRecord(
     toughness: card.toughness ?? null,
     loyalty: card.loyalty ?? null,
     producedManaJson: safeJson(producedMana),
-
     legalityStandard: card.legalities?.standard ?? null,
     legalityFuture: card.legalities?.future ?? null,
     bannedInStandard: card.legalities?.standard === "banned" ? 1 : 0,
-
     setCode: card.set,
     setName: card.set_name,
     setType: card.set_type ?? null,
     collectorNumber: card.collector_number ?? null,
     rarity: card.rarity ?? null,
-
+    releasedAt: card.released_at ?? null,
     imageNormal,
     priceUsd: parsePrice(card.prices?.usd),
     priceUsdFoil: parsePrice(card.prices?.usd_foil),
     priceEur: parsePrice(card.prices?.eur),
     edhrecRank: card.edhrec_rank ?? null,
     gameChanger: card.game_changer ? 1 : 0,
-
     flavorText: card.flavor_text ?? null,
     artist: card.artist ?? null,
-
     searchText,
     importedAt,
   };
+}
+
+export function extractSetsFromCards(cards: CardRecord[], importedAt: string): SetRecord[] {
+  const seen = new Map<string, SetRecord>();
+  for (const card of cards) {
+    if (!seen.has(card.setCode)) {
+      seen.set(card.setCode, {
+        code: card.setCode,
+        name: card.setName,
+        releaseDate: card.releasedAt,
+        setType: card.setType,
+        importedAt,
+      });
+    }
+  }
+  return [...seen.values()].sort((a, b) =>
+    (b.releaseDate ?? "").localeCompare(a.releaseDate ?? "")
+  );
 }
