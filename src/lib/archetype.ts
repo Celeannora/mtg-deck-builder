@@ -1,5 +1,5 @@
-import type { CardRecord } from "./types";
-import { assignRoles, type CardRole } from "./roles";
+import type { DeckEntry } from "./legality";
+import { assignRoles, isThreat, isInteraction } from "./roles";
 
 export type Archetype =
   | "Aggro"
@@ -14,142 +14,130 @@ export type Archetype =
   | "Sacrifice"
   | "Unknown";
 
-export interface ArchetypeBenchmark {
-  threats: [number, number];
-  removal: [number, number];
-  cardDraw: [number, number];
-  counterspells: [number, number];
-  lands: [number, number];
+export interface ArchetypeDetectionResult {
+  archetype: Archetype;
+  confidence: number; // 0-1
+  signals: string[];
 }
-
-export const BENCHMARKS: Record<Archetype, ArchetypeBenchmark> = {
-  Aggro:     { threats: [24, 28], removal: [4, 8],   cardDraw: [0, 4],   counterspells: [0, 2],  lands: [20, 22] },
-  Burn:      { threats: [20, 24], removal: [8, 12],  cardDraw: [0, 4],   counterspells: [0, 2],  lands: [20, 22] },
-  Midrange:  { threats: [16, 20], removal: [8, 12],  cardDraw: [4, 8],   counterspells: [0, 4],  lands: [22, 24] },
-  Control:   { threats: [6, 10],  removal: [12, 16], cardDraw: [10, 14], counterspells: [8, 12], lands: [24, 26] },
-  Combo:     { threats: [8, 12],  removal: [4, 8],   cardDraw: [4, 8],   counterspells: [0, 4],  lands: [22, 24] },
-  Tempo:     { threats: [16, 20], removal: [6, 10],  cardDraw: [4, 8],   counterspells: [4, 8],  lands: [20, 22] },
-  Ramp:      { threats: [8, 14],  removal: [4, 8],   cardDraw: [4, 8],   counterspells: [0, 4],  lands: [24, 27] },
-  Tokens:    { threats: [16, 22], removal: [4, 8],   cardDraw: [4, 8],   counterspells: [0, 4],  lands: [22, 24] },
-  Graveyard: { threats: [12, 18], removal: [4, 8],   cardDraw: [4, 8],   counterspells: [0, 4],  lands: [22, 24] },
-  Sacrifice: { threats: [16, 22], removal: [6, 10],  cardDraw: [4, 8],   counterspells: [0, 4],  lands: [22, 24] },
-  Unknown:   { threats: [10, 20], removal: [4, 12],  cardDraw: [2, 10],  counterspells: [0, 6],  lands: [20, 26] },
-};
 
 export interface RoleComposition {
   threats: number;
   removal: number;
-  cardDraw: number;
-  counterspells: number;
   boardWipes: number;
+  counterspells: number;
+  cardDraw: number;
   ramp: number;
   lands: number;
-  other: number;
+  total: number;
 }
 
-export interface ArchetypeResult {
-  archetype: Archetype;
-  confidence: number;
-  composition: RoleComposition;
-  speedRating: "Turn 3-4 Kill" | "Turn 4-6 Midgame" | "Grindy / Late Game";
-}
+export const ARCHETYPE_BENCHMARKS: Record<Archetype, Partial<RoleComposition>> = {
+  Aggro:     { threats: 26, removal: 6,  boardWipes: 0,  counterspells: 1,  cardDraw: 2,  ramp: 0,  lands: 21 },
+  Burn:      { threats: 12, removal: 16, boardWipes: 0,  counterspells: 0,  cardDraw: 4,  ramp: 0,  lands: 20 },
+  Midrange:  { threats: 18, removal: 10, boardWipes: 2,  counterspells: 2,  cardDraw: 6,  ramp: 2,  lands: 23 },
+  Control:   { threats: 8,  removal: 14, boardWipes: 4,  counterspells: 10, cardDraw: 12, ramp: 0,  lands: 25 },
+  Combo:     { threats: 10, removal: 6,  boardWipes: 0,  counterspells: 2,  cardDraw: 8,  ramp: 4,  lands: 23 },
+  Tempo:     { threats: 16, removal: 8,  boardWipes: 0,  counterspells: 6,  cardDraw: 6,  ramp: 0,  lands: 22 },
+  Ramp:      { threats: 10, removal: 6,  boardWipes: 2,  counterspells: 0,  cardDraw: 6,  ramp: 10, lands: 24 },
+  Tokens:    { threats: 20, removal: 6,  boardWipes: 4,  counterspells: 0,  cardDraw: 6,  ramp: 2,  lands: 22 },
+  Graveyard: { threats: 14, removal: 8,  boardWipes: 2,  counterspells: 2,  cardDraw: 8,  ramp: 4,  lands: 23 },
+  Sacrifice:{ threats: 16, removal: 10, boardWipes: 2,  counterspells: 0,  cardDraw: 8,  ramp: 2,  lands: 22 },
+  Unknown:   {}
+};
 
-const THREAT_ROLES: CardRole[] = ["Beater", "Evasive Threat", "Finisher", "Value Engine", "Planeswalker"];
+export function getRoleComposition(entries: DeckEntry[]): RoleComposition {
+  let threats = 0, removal = 0, boardWipes = 0, counterspells = 0, cardDraw = 0, ramp = 0, lands = 0;
 
-export function analyzeArchetype(
-  cards: CardRecord[]
-): ArchetypeResult {
-  const roleMap = new Map<CardRole, number>();
-  for (const card of cards) {
-    const roles = assignRoles(card);
-    for (const role of roles) {
-      roleMap.set(role, (roleMap.get(role) ?? 0) + 1);
-    }
+  for (const entry of entries) {
+    const qty = entry.quantity;
+    const tl = entry.card.typeLine;
+    if (tl.includes("Land")) { lands += qty; continue; }
+
+    const roles = assignRoles(entry.card);
+    if (isThreat(roles)) threats += qty;
+    if (roles.includes("Removal")) removal += qty;
+    if (roles.includes("BoardWipe")) boardWipes += qty;
+    if (roles.includes("Counterspell")) counterspells += qty;
+    if (roles.includes("CardDraw")) cardDraw += qty;
+    if (roles.includes("Ramp")) ramp += qty;
   }
 
-  const get = (role: CardRole) => roleMap.get(role) ?? 0;
-
-  const composition: RoleComposition = {
-    threats: THREAT_ROLES.reduce((sum, r) => sum + get(r), 0),
-    removal: get("Removal"),
-    cardDraw: get("Card Draw"),
-    counterspells: get("Counterspell"),
-    boardWipes: get("Board Wipe"),
-    ramp: get("Ramp"),
-    lands: get("Land"),
-    other: 0,
-  };
-  composition.other =
-    cards.length -
-    composition.threats -
-    composition.removal -
-    composition.cardDraw -
-    composition.counterspells -
-    composition.ramp -
-    composition.lands;
-
-  // Auto-detect archetype
-  let archetype: Archetype = "Unknown";
-  let confidence = 0;
-
-  const avmv =
-    cards.filter((c) => !c.typeLine.includes("Land")).reduce((s, c) => s + c.cmc, 0) /
-    Math.max(1, cards.filter((c) => !c.typeLine.includes("Land")).length);
-
-  const tokenCards = cards.filter((c) =>
-    /create.*token/i.test(c.oracleText ?? "")
-  ).length;
-  const graveyardCards = cards.filter((c) =>
-    /from (your|a|target player's) graveyard|mill|discard.*creature/i.test(
-      c.oracleText ?? ""
-    )
-  ).length;
-  const sacrificeCards = cards.filter((c) =>
-    /sacrifice a creature/i.test(c.oracleText ?? "")
-  ).length;
-  const directDamage = cards.filter((c) =>
-    /damage to (any target|target player|each opponent)/i.test(c.oracleText ?? "")
-  ).length;
-  const rampCards = composition.ramp;
-  const counters = composition.counterspells + composition.boardWipes;
-
-  if (avmv <= 2.2 && composition.threats >= 20 && directDamage >= 6) {
-    archetype = "Burn"; confidence = 0.85;
-  } else if (avmv <= 2.4 && composition.threats >= 22) {
-    archetype = "Aggro"; confidence = 0.8;
-  } else if (counters >= 10 && composition.cardDraw >= 8) {
-    archetype = "Control"; confidence = 0.8;
-  } else if (rampCards >= 6 && avmv >= 3.0) {
-    archetype = "Ramp"; confidence = 0.75;
-  } else if (tokenCards >= 6) {
-    archetype = "Tokens"; confidence = 0.7;
-  } else if (graveyardCards >= 6) {
-    archetype = "Graveyard"; confidence = 0.7;
-  } else if (sacrificeCards >= 4) {
-    archetype = "Sacrifice"; confidence = 0.7;
-  } else if (composition.counterspells >= 4 && avmv <= 2.8) {
-    archetype = "Tempo"; confidence = 0.65;
-  } else if (avmv >= 2.5 && avmv <= 3.5) {
-    archetype = "Midrange"; confidence = 0.6;
-  } else {
-    archetype = "Unknown"; confidence = 0.3;
-  }
-
-  const speedRating =
-    archetype === "Aggro" || archetype === "Burn"
-      ? "Turn 3-4 Kill"
-      : archetype === "Control" || archetype === "Ramp"
-      ? "Grindy / Late Game"
-      : "Turn 4-6 Midgame";
-
-  return { archetype, confidence, composition, speedRating };
+  const total = entries.reduce((s, e) => s + e.quantity, 0);
+  return { threats, removal, boardWipes, counterspells, cardDraw, ramp, lands, total };
 }
 
-export function getBenchmarkStatus(
-  value: number,
-  range: [number, number]
-): "green" | "yellow" | "red" {
-  if (value >= range[0] && value <= range[1]) return "green";
-  if (value >= range[0] - 2 && value <= range[1] + 2) return "yellow";
-  return "red";
+function score(
+  comp: RoleComposition,
+  archetype: Archetype
+): number {
+  const bench = ARCHETYPE_BENCHMARKS[archetype];
+  if (!bench || archetype === "Unknown") return 0;
+
+  let s = 0;
+  const keys: Array<keyof RoleComposition> = ["threats", "removal", "boardWipes", "counterspells", "cardDraw", "ramp", "lands"];
+  for (const k of keys) {
+    const target = bench[k] ?? 0;
+    const actual = comp[k] ?? 0;
+    if (target === 0) continue;
+    const ratio = actual / target;
+    s += ratio >= 0.8 && ratio <= 1.4 ? 2 : ratio >= 0.6 ? 1 : 0;
+  }
+  return s;
+}
+
+export function detectArchetype(entries: DeckEntry[]): ArchetypeDetectionResult {
+  const comp = getRoleComposition(entries);
+  const text = entries
+    .map(e => (e.card.oracleText ?? "").toLowerCase())
+    .join(" ");
+
+  const signals: string[] = [];
+
+  // Special pattern signals
+  const hasTokenMakers = text.includes("create") && text.includes("token");
+  const hasSacrificeOutlets = text.includes("sacrifice a creature");
+  const hasGraveyardRecur = text.includes("return") && text.includes("from your graveyard");
+  const hasDirectDamage = (text.match(/damage to (any target|target player|each opponent)/g) ?? []).length >= 6;
+  const avgCmc = comp.total > 0
+    ? entries.filter(e => !e.card.typeLine.includes("Land")).reduce((s, e) => s + e.card.cmc * e.quantity, 0)
+      / entries.filter(e => !e.card.typeLine.includes("Land")).reduce((s, e) => s + e.quantity, 1)
+    : 0;
+
+  if (hasTokenMakers) signals.push("Token creators detected");
+  if (hasSacrificeOutlets) signals.push("Sacrifice outlets detected");
+  if (hasGraveyardRecur) signals.push("Graveyard recursion detected");
+  if (hasDirectDamage) signals.push("Heavy direct damage package");
+  if (avgCmc < 2.2) signals.push(`Low avg MV (${avgCmc.toFixed(1)}) — aggressive curve`);
+  if (avgCmc > 3.5) signals.push(`High avg MV (${avgCmc.toFixed(1)}) — late game curve`);
+  if (comp.counterspells >= 8) signals.push("Heavy counterspell suite");
+  if (comp.ramp >= 8) signals.push("Heavy ramp suite");
+
+  // Override detections
+  if (hasSacrificeOutlets && hasTokenMakers) {
+    return { archetype: "Sacrifice", confidence: 0.75, signals };
+  }
+  if (hasTokenMakers && comp.threats >= 18) {
+    return { archetype: "Tokens", confidence: 0.75, signals };
+  }
+  if (hasGraveyardRecur && comp.ramp >= 4) {
+    return { archetype: "Graveyard", confidence: 0.70, signals };
+  }
+  if (hasDirectDamage) {
+    return { archetype: "Burn", confidence: 0.80, signals };
+  }
+
+  // Score-based detection
+  const archetypes: Archetype[] = ["Aggro", "Midrange", "Control", "Combo", "Tempo", "Ramp"];
+  let bestArchetype: Archetype = "Unknown";
+  let bestScore = 0;
+
+  for (const arch of archetypes) {
+    const s = score(comp, arch);
+    if (s > bestScore) { bestScore = s; bestArchetype = arch; }
+  }
+
+  const maxPossible = 14;
+  const confidence = Math.min(bestScore / maxPossible, 1);
+
+  return { archetype: bestArchetype, confidence, signals };
 }

@@ -1,58 +1,95 @@
-import type { ArchetypeResult } from "../lib/archetype";
-import { BENCHMARKS, getBenchmarkStatus } from "../lib/archetype";
+import { useMemo } from "react";
+import { useDeckStore } from "../store/deckStore";
+import { detectArchetype, analyzeDeckComposition, getRoleComposition } from "../lib/archetype";
+import { analyzeDeckComposition as analyzeComp } from "../lib/deckComposition";
 
-interface Props {
-  result: ArchetypeResult;
-}
-
-const STATUS_COLORS = {
-  green: "text-emerald-400",
-  yellow: "text-amber-400",
-  red: "text-red-400",
+const TRAFFIC_COLORS = {
+  green:  "text-emerald-400",
+  yellow: "text-yellow-400",
+  red:    "text-red-400"
 };
 
-export function ArchetypePanel({ result }: Props) {
-  const bench = BENCHMARKS[result.archetype];
-  const { composition } = result;
+const TRAFFIC_BG = {
+  green:  "bg-emerald-900/30",
+  yellow: "bg-yellow-900/30",
+  red:    "bg-red-900/30"
+};
 
-  const rows = [
-    { label: "Threats", value: composition.threats, range: bench.threats },
-    { label: "Removal", value: composition.removal, range: bench.removal },
-    { label: "Card Draw", value: composition.cardDraw, range: bench.cardDraw },
-    { label: "Counterspells", value: composition.counterspells, range: bench.counterspells },
-    { label: "Lands", value: composition.lands, range: bench.lands },
-  ];
+export function ArchetypePanel() {
+  const { entries } = useDeckStore();
+
+  const detection = useMemo(() => detectArchetype(entries), [entries]);
+  const composition = useMemo(
+    () => analyzeComp(entries, detection.archetype),
+    [entries, detection.archetype]
+  );
+
+  const confidencePct = Math.round(detection.confidence * 100);
+
+  if (entries.length === 0) {
+    return (
+      <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-4 text-sm text-zinc-400">
+        Add cards to detect archetype.
+      </div>
+    );
+  }
 
   return (
-    <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-4">
-      <div className="mb-3 flex items-start justify-between">
+    <div className="flex flex-col gap-4 rounded-xl border border-zinc-800 bg-zinc-950 p-4 text-sm text-zinc-100">
+
+      {/* Archetype header */}
+      <div className="flex items-center justify-between">
         <div>
-          <p className="text-sm font-semibold text-zinc-100">
-            {result.archetype}
-          </p>
-          <p className="text-xs text-zinc-400">{result.speedRating}</p>
+          <span className="text-lg font-bold text-teal-400">{detection.archetype}</span>
+          <span className="ml-2 text-xs text-zinc-500">{confidencePct}% confidence</span>
         </div>
-        <span className="rounded-full bg-zinc-800 px-2 py-0.5 text-xs text-zinc-300">
-          {Math.round(result.confidence * 100)}% confidence
-        </span>
+        <div className="h-2 w-24 rounded-full bg-zinc-800 overflow-hidden">
+          <div className="h-full bg-teal-500 rounded-full" style={{ width: `${confidencePct}%` }} />
+        </div>
       </div>
 
-      <div className="space-y-1.5">
-        {rows.map(({ label, value, range }) => {
-          const status = getBenchmarkStatus(value, range as [number, number]);
-          return (
-            <div key={label} className="flex items-center justify-between">
-              <span className="text-xs text-zinc-400">{label}</span>
-              <span className={`text-xs font-medium ${STATUS_COLORS[status]}`}>
-                {value}
-                <span className="ml-1 text-zinc-600">
-                  ({range[0]}-{range[1]})
-                </span>
+      {/* Detection signals */}
+      {detection.signals.length > 0 && (
+        <div className="flex flex-col gap-0.5">
+          {detection.signals.map((s, i) => (
+            <div key={i} className="text-xs text-zinc-400">→ {s}</div>
+          ))}
+        </div>
+      )}
+
+      {/* Role composition vs benchmarks */}
+      <div className="border-t border-zinc-800 pt-3">
+        <div className="text-xs text-zinc-500 uppercase tracking-wide mb-2">Role Composition</div>
+        <div className="flex flex-col gap-1">
+          {composition.checks.map(check => (
+            <div key={check.label} className={`flex items-center gap-2 rounded px-2 py-1 ${TRAFFIC_BG[check.status]}`}>
+              <span className={`text-xs font-mono w-4 text-center ${TRAFFIC_COLORS[check.status]}`}>
+                {check.status === "green" ? "●" : check.status === "yellow" ? "◐" : "○"}
               </span>
+              <span className="flex-1 text-zinc-300">{check.label}</span>
+              <span className="font-mono text-xs text-zinc-400">{check.actual}</span>
+              <span className="text-zinc-600 text-xs">/</span>
+              <span className="font-mono text-xs text-zinc-500">{check.target}</span>
             </div>
-          );
-        })}
+          ))}
+        </div>
       </div>
+
+      {/* Weak spots */}
+      {composition.weakSpots.length > 0 && (
+        <div className="border-t border-zinc-800 pt-3">
+          <div className="text-xs text-zinc-500 uppercase tracking-wide mb-2">Weak Spots</div>
+          <div className="flex flex-col gap-1.5">
+            {composition.weakSpots.map((ws, i) => (
+              <div key={i} className="flex items-start gap-2 text-xs">
+                <span className="text-yellow-500 mt-0.5">⚠</span>
+                <span className="text-zinc-300">{ws}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }
