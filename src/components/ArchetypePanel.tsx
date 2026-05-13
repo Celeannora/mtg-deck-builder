@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { useDeckStore } from "../store/deckStore";
-import { detectArchetype, analyzeDeckComposition, getRoleComposition } from "../lib/archetype";
-import { analyzeDeckComposition as analyzeComp } from "../lib/deckComposition";
+import { detectArchetype } from "../lib/archetype";
+import { analyzeDeckComposition } from "../lib/deckComposition";
 
 const TRAFFIC_COLORS = {
   green:  "text-emerald-400",
@@ -20,7 +20,7 @@ export function ArchetypePanel() {
 
   const detection = useMemo(() => detectArchetype(entries), [entries]);
   const composition = useMemo(
-    () => analyzeComp(entries, detection.archetype),
+    () => analyzeDeckComposition(entries, detection.archetype),
     [entries, detection.archetype]
   );
 

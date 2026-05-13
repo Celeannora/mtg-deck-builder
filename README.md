@@ -3,7 +3,7 @@
 A fully local, offline-capable Standard deck builder built on React + TypeScript + Dexie (IndexedDB).  
 Card data sourced from [Scryfall bulk data](https://scryfall.com/docs/api/bulk-data). Images © Wizards of the Coast.
 
-> **Development status:** Active — see [CHANGELOG.md](./CHANGELOG.md) for full phase-by-phase history.
+> **Development status:** Active  
 > **Rule:** Every commit that changes code must also update this file.
 
 ---
@@ -26,182 +26,123 @@ All data is stored in IndexedDB (Dexie). No server required.
 
 ## Phase Status
 
-> Last updated: 2026-05-13 (commit `d6f4fa1`). Reflects what is **actually committed**.
+> Last updated: 2026-05-13. Reflects what is **actually committed and verified**.
 
-| Phase | Description | Status | Last commit |
+| Phase | Description | Status | Notes |
 |---|---|---|---|
-| 1 | Data Foundation | ✅ Complete | `d6f4fa1` |
-| 2 | Format Legality Engine | ⚠️ Partial | undocumented |
-| 3 | Mana Base Calculator | ⚠️ Partial | undocumented |
-| 4 | Archetype Engine | ⚠️ Partial | undocumented |
-| 5 | 3-Panel UI Shell | ⚠️ Partial | undocumented |
-| 6 | AI Construction Assistant | ⚠️ Partial | undocumented |
+| 1 | Data Foundation | ✅ Complete | Import, search, DB, status bar |
+| 2 | Format Legality Engine | ✅ Complete | legality, companion, rotation, deckStore, ValidationPanel, legality.test.ts |
+| 3 | Mana Base Calculator | ✅ Complete | manaBase, manaBaseStore, ManaBasePanel, ManaCurveChart |
+| 4 | Archetype Engine | ✅ Complete | archetype, roles, deckComposition, ArchetypePanel |
+| 5 | 3-Panel UI Shell | ✅ Complete | CardSearchPanel, DeckPanel, DeckStatsBar, RightPanel, CardDetailDrawer |
+| 6 | AI Construction Assistant | ⚠️ Partial | Files committed, unaudited |
 | 7 | Metagame Engine | ⬜ Planned | — |
 | 8 | Import / Export | ⬜ Planned | — |
 | 9 | Bo3 Competitive Mode | ⬜ Planned | — |
-| 10 | Tests + CI | ⬜ Planned | — |
+| 10 | Tests + CI | ⚠️ Partial | legality.test.ts ✅, remainder pending |
 | 11 | Competitive Intelligence | ⬜ Planned | — |
 | 12 | Final Integration + PWA | ⬜ Planned | — |
 
 ---
 
-## Phase 1 — Data Foundation (✅ Complete)
+## Bug Fixes (this commit)
 
-Full local-first card ingestion pipeline. Parses Scryfall `oracle_cards.json`,
-filters to Standard-legal cards, extracts sets, persists to IndexedDB via Dexie,
-and surfaces a live status bar. Supports both local file picker and network download.
+| File | Bug | Fix |
+|---|---|---|
+| `DeckPanel.tsx` | `validation.issues` / `DeckCard` don't exist | Use `validation.violations` + `DeckEntry` |
+| `DeckStatsBar.tsx` | Read dead props from deckStore | Rewritten to read `entries` + `useManaBaseStore` |
+| `ArchetypePanel.tsx` | Import `analyzeDeckComposition` from wrong module | Import from `deckComposition` only |
+| `ManaCurveChart.tsx` | Required props crash when called bare from RightPanel | Props now optional; falls back to stores |
+| `CardSearchPanel.tsx` | `addCard(card)` missing board arg | Fixed to `addCard(card, "main")` |
+| `deckComposition.ts` | `trafficLight` `||` → `&&` (every value passed yellow) | Fixed |
+
+---
+
+## Phase 1 — Data Foundation (✅ Complete)
 
 | File | Purpose |
 |---|---|
-| `src/lib/types.ts` | All TypeScript interfaces: `ScryfallCard`, `CardRecord`, `SetRecord`, `DatabaseStatus`, `ImportProgress`, `ImportResult`, `ScryfallBulkDataEntry` |
-| `src/lib/db.ts` | Dexie v2 schema (`cards`, `cardSets`, `userDecks`, `deckVersions`, `meta`). `replaceAllCards()`, `getDatabaseStatus()`, `isDatabaseStale()`, `saveDeck()`, `getDeckVersions()` |
-| `src/lib/scryfall.ts` | `isStandardEligible()`, `toCardRecord()`, `extractSetsFromCards()` |
-| `src/lib/scryfallApi.ts` | `discoverOracleCardsDumpUri()` — discovers latest oracle_cards dump from Scryfall bulk-data index |
-| `src/lib/search.ts` | `searchCards()` — full filter/sort/paginate over IndexedDB. `getDistinctKeywords()`, `getStandardSets()` |
-| `src/workers/importWorker.ts` | Web Worker. Accepts `File` (local) or `{ url }` (network/XHR). Filter → transform → set extraction → save. Posts `progress/done/error` |
-| `src/components/BulkImporter.tsx` | Import UI with mode toggle (local/network), progress bar, result summary |
-| `src/components/DatabaseStatusBar.tsx` | Status bar: card count, set count, staleness badge, auto-refresh every 60s |
-| `src/hooks/useDBStatus.ts` | Reactive DB status hook — re-fires on Dexie `cards` write |
-| `src/components/Header.tsx` | App header: SVG logo, view toggle, Scryfall attribution |
-| `src/App.tsx` | Root component. Import/builder routing, mounts all top-level components |
+| `src/lib/types.ts` | All TypeScript interfaces |
+| `src/lib/db.ts` | Dexie v3 schema + CRUD + deck versioning |
+| `src/lib/scryfall.ts` | Eligibility filter + card/set transformer |
+| `src/lib/scryfallApi.ts` | Bulk-data API discovery |
+| `src/lib/search.ts` | Card filter/sort/paginate engine |
+| `src/workers/importWorker.ts` | Web Worker: file + network import |
+| `src/components/BulkImporter.tsx` | Import UI (file + network mode) |
+| `src/components/DatabaseStatusBar.tsx` | Persistent status bar |
+| `src/components/Header.tsx` | App header + nav |
+| `src/hooks/useDBStatus.ts` | Reactive DB status hook |
+| `src/App.tsx` | Root component |
 
 ---
 
-## Phases 2–6 — Partially Committed (Undocumented)
+## Phase 2 — Format Legality Engine (✅ Complete)
 
-The following files exist in the repo but were committed without CHANGELOG entries.
-They will be formally documented as each phase is audited and completed.
-
-**Phase 2 — Legality Engine**
-- `src/lib/legality.ts`, `src/lib/companion.ts`, `src/lib/rotation.ts`
-- `src/components/ValidationPanel.tsx`
-- ❌ `legality.test.ts` — listed in original CHANGELOG, never committed
-
-**Phase 3 — Mana Base**
-- `src/lib/manaBase.ts`, `src/lib/manaBaseStore.ts`, `src/lib/colorDistribution.ts`
-- `src/components/ManaBasePanel.tsx`, `src/components/ManaCurveChart.tsx`
-
-**Phase 4 — Archetype Engine**
-- `src/lib/archetype.ts`, `src/lib/roles.ts`, `src/lib/synergy.ts`
-- `src/components/ArchetypePanel.tsx`
-
-**Phase 5 — 3-Panel UI Shell**
-- `src/components/CardSearchPanel.tsx`, `src/components/CardDetailDrawer.tsx`
-- `src/components/DeckPanel.tsx`, `src/components/DeckStatsBar.tsx`
-- `src/components/RightPanel.tsx`, `src/store/deckStore.ts`
-
-**Phase 6 — AI Construction Assistant**
-- `src/lib/buildWizard.ts`, `src/lib/budgetOptimizer.ts`, `src/lib/comboFinder.ts`
-- `src/lib/optimizeEngine.ts`, `src/lib/deckComposition.ts`, `src/lib/powerScore.ts`
-- `src/lib/powerSignal.ts`, `src/lib/similarCards.ts`, `src/lib/suggestions.ts`, `src/lib/whatsMissing.ts`
-- `src/components/AdvisorPanel.tsx`, `src/components/GamePlanSummary.tsx`, `src/components/SuggestionPanel.tsx`
+| File | Purpose |
+|---|---|
+| `src/lib/legality.ts` | Standard rules: MIN_60, COPY_LIMIT, sideboard, banned, not_legal |
+| `src/lib/companion.ts` | All 8 companion deck-building restrictions |
+| `src/lib/rotation.ts` | Rotation warning computation (requires set release date feed) |
+| `src/store/deckStore.ts` | Zustand deck state — add/remove/move/validate on every mutation |
+| `src/components/ValidationPanel.tsx` | Legality UI: rule checklist, copy violations, companion check, color bar |
+| `src/tests/legality.test.ts` | 20 unit tests covering all rules + 5 companions |
 
 ---
 
-## ⚠️ Open Issues
+## Phase 3 — Mana Base Calculator (✅ Complete)
+
+| File | Purpose |
+|---|---|
+| `src/lib/manaBase.ts` | Pip parser, land count algo, color source recommendation, dual land tiering, curve builder, hypergeometric castability |
+| `src/lib/manaBaseStore.ts` | Zustand async compute store; queries DB for dual land suggestions |
+| `src/components/ManaBasePanel.tsx` | Land count, color sources, dual suggestions, castability warnings |
+| `src/components/ManaCurveChart.tsx` | Stacked SVG histogram with archetype ideal overlay. Props optional — reads from stores when bare |
+
+---
+
+## Phase 4 — Archetype Engine (✅ Complete)
+
+| File | Purpose |
+|---|---|
+| `src/lib/roles.ts` | Text/keyword → CardRole classifier (17 roles) |
+| `src/lib/archetype.ts` | Role composition + signal-based archetype detection (10 archetypes) |
+| `src/lib/deckComposition.ts` | TrafficLight composition checker vs archetype benchmarks + weak-spot advisor |
+| `src/components/ArchetypePanel.tsx` | Archetype header, signals, role composition grid, weak spots |
+
+---
+
+## Phase 5 — 3-Panel UI Shell (✅ Complete)
+
+| File | Purpose |
+|---|---|
+| `src/components/CardSearchPanel.tsx` | Search + filters (color, rarity, CMC, sort) with synergy stars |
+| `src/components/DeckPanel.tsx` | Mainboard/sideboard list, inline violations, export .txt |
+| `src/components/DeckStatsBar.tsx` | Compact bar: card count, legality, archetype, avg MV, color pips, violation badge |
+| `src/components/RightPanel.tsx` | 5-tab panel: Curve / Mana / Archetype / Validate / Game Plan |
+| `src/components/CardDetailDrawer.tsx` | Card detail overlay |
+| `src/components/GamePlanSummary.tsx` | Natural-language game plan + stat chips |
+| `src/store/deckStore.ts` | Zustand: add/remove/move/setQuantity/clear/setName + live validation |
+
+---
+
+## Phase 6 — AI Construction Assistant (⚠️ Partial — Unaudited)
+
+Files committed but not yet audited for correctness or wiring:
+
+`buildWizard.ts`, `budgetOptimizer.ts`, `comboFinder.ts`, `optimizeEngine.ts`,  
+`powerScore.ts`, `powerSignal.ts`, `similarCards.ts`, `suggestions.ts`, `whatsMissing.ts`,  
+`AdvisorPanel.tsx`, `SuggestionPanel.tsx`
+
+---
+
+## Open Issues
 
 | Issue | Status |
 |---|---|
-| `legality.test.ts` documented in CHANGELOG but never committed | ❌ Needs to be written |
-| Python implementation (`main.py`, `core/`, `ui/`) exists with no docs or decision | ❌ Needs decision: document, branch, or delete |
-| Phases 2–6 files need audit passes and formal CHANGELOG entries | ❌ In queue |
-
----
-
-## Full File Map
-
-```
-mtg-deck-builder/
-├── README.md                      ← updated every commit
-├── CHANGELOG.md
-├── TODO.md
-├── .gitignore
-├── main.py                        ⚠️ Python entry point (decision pending)
-├── requirements.txt               ⚠️ Python deps (decision pending)
-├── core/                          ⚠️ Python implementation (decision pending)
-├── ui/                            ⚠️ Python UI (decision pending)
-└── src/
-    ├── App.tsx                    ✅ Ph1
-    ├── main.tsx
-    ├── index.css
-    ├── lib/
-    │   ├── types.ts               ✅ Ph1
-    │   ├── db.ts                  ✅ Ph1
-    │   ├── scryfall.ts            ✅ Ph1
-    │   ├── scryfallApi.ts         ✅ Ph1
-    │   ├── search.ts              ✅ Ph1
-    │   ├── legality.ts            ⚠️ Ph2 (undocumented)
-    │   ├── companion.ts           ⚠️ Ph2 (undocumented)
-    │   ├── rotation.ts            ⚠️ Ph2 (undocumented)
-    │   ├── manaBase.ts            ⚠️ Ph3 (undocumented)
-    │   ├── manaBaseStore.ts       ⚠️ Ph3 (undocumented)
-    │   ├── colorDistribution.ts   ⚠️ Ph3 (undocumented)
-    │   ├── archetype.ts           ⚠️ Ph4 (undocumented)
-    │   ├── roles.ts               ⚠️ Ph4 (undocumented)
-    │   ├── synergy.ts             ⚠️ Ph4 (undocumented)
-    │   ├── buildWizard.ts         ⚠️ Ph6 (undocumented)
-    │   ├── budgetOptimizer.ts     ⚠️ Ph6 (undocumented)
-    │   ├── comboFinder.ts         ⚠️ Ph6 (undocumented)
-    │   ├── optimizeEngine.ts      ⚠️ Ph6 (undocumented)
-    │   ├── deckComposition.ts     ⚠️ Ph6 (undocumented)
-    │   ├── powerScore.ts          ⚠️ Ph6 (undocumented)
-    │   ├── powerSignal.ts         ⚠️ Ph6 (undocumented)
-    │   ├── similarCards.ts        ⚠️ Ph6 (undocumented)
-    │   ├── suggestions.ts         ⚠️ Ph6 (undocumented)
-    │   └── whatsMissing.ts        ⚠️ Ph6 (undocumented)
-    ├── workers/
-    │   └── importWorker.ts        ✅ Ph1
-    ├── store/
-    │   └── deckStore.ts           ⚠️ Ph5 (undocumented)
-    ├── hooks/
-    │   └── useDBStatus.ts         ✅ Ph1
-    └── components/
-        ├── BulkImporter.tsx       ✅ Ph1
-        ├── DatabaseStatusBar.tsx  ✅ Ph1
-        ├── Header.tsx             ✅ Ph1
-        ├── ValidationPanel.tsx    ⚠️ Ph2 (undocumented)
-        ├── CardSearchPanel.tsx    ⚠️ Ph5 (undocumented)
-        ├── CardDetailDrawer.tsx   ⚠️ Ph5 (undocumented)
-        ├── DeckPanel.tsx          ⚠️ Ph5 (undocumented)
-        ├── DeckStatsBar.tsx       ⚠️ Ph5 (undocumented)
-        ├── ManaBasePanel.tsx      ⚠️ Ph3 (undocumented)
-        ├── ManaCurveChart.tsx     ⚠️ Ph3 (undocumented)
-        ├── ArchetypePanel.tsx     ⚠️ Ph4 (undocumented)
-        ├── AdvisorPanel.tsx       ⚠️ Ph6 (undocumented)
-        ├── GamePlanSummary.tsx    ⚠️ Ph6 (undocumented)
-        ├── SuggestionPanel.tsx    ⚠️ Ph6 (undocumented)
-        └── RightPanel.tsx         ⚠️ Ph5 (undocumented)
-```
-
----
-
-## Architecture (TypeScript)
-
-```
-src/lib/types.ts            — All TypeScript interfaces
-src/lib/db.ts               — Dexie schema + CRUD + deck versioning
-src/lib/scryfall.ts         — Eligibility filter + card/set transformer
-src/lib/scryfallApi.ts      — Scryfall bulk-data API discovery
-src/lib/search.ts           — Card filter/sort/paginate engine
-src/lib/legality.ts         — Standard rules engine
-src/workers/importWorker.ts — Web Worker: file + network import
-src/store/deckStore.ts      — Zustand deck state
-src/hooks/useDBStatus.ts    — Reactive DB status hook
-src/components/
-  BulkImporter.tsx          — Import UI (file + network mode)
-  DatabaseStatusBar.tsx     — Persistent status bar
-  Header.tsx                — App header + nav
-  ValidationPanel.tsx       — Legality violations + warnings
-  ManaBasePanel.tsx         — Mana base calculator UI
-  ManaCurveChart.tsx        — Mana curve histogram
-  ArchetypePanel.tsx        — Archetype detection
-  CardSearchPanel.tsx       — Card search + filters
-  CardDetailDrawer.tsx      — Card detail drawer
-  DeckPanel.tsx             — Mainboard + sideboard zones
-  DeckStatsBar.tsx          — Deck stats bar
-  AdvisorPanel.tsx          — Build advisor
-  RightPanel.tsx            — Right stats column
-```
+| `rotation.ts` — `setReleaseDates` map never populated | ⚠️ Needs wiring to `db.cardSets` |
+| Python implementation (`main.py`, `core/`, `ui/`) — no docs or decision | ❌ Needs decision: document, branch, or delete |
+| Ph6 files need audit pass | ❌ In queue |
+| `manaBaseStore.compute()` always passes `archetypeProfile = "midrange"` | ⚠️ Should read from detected archetype |
 
 ---
 
@@ -212,8 +153,8 @@ src/components/
 - All cards must be `legal` in Standard (`legalities.standard === "legal"`)
 - Banned cards flagged separately
 - Sideboard: exactly 0 or 15 cards
-- Companion deck-building restrictions (Lurrus, Yorion, Kaheera, Umori)
-- Rotation warnings for cards within 90 days of rotating out
+- Companion deck-building restrictions: Lurrus, Yorion, Kaheera, Obosh, Umori, Gyruda, Jegantha, Zirda
+- Rotation warnings for sets ≥18 months old when next rotation is ≤90 days away
 
 ---
 
@@ -223,7 +164,7 @@ src/components/
 - **Vite** (build + dev server)
 - **Dexie 3** (IndexedDB ORM)
 - **Tailwind CSS v4**
-- **Zustand** (deck state)
+- **Zustand** (deck state + mana base store)
 - **Vitest** (unit tests)
 - **Playwright** (E2E — Phase 10)
 

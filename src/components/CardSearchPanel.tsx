@@ -28,22 +28,25 @@ function CardRow({
   card,
   deckCards,
   onAdd,
+  onCardClick,
 }: {
   card: CardRecord;
   deckCards: CardRecord[];
   onAdd: (card: CardRecord) => void;
+  onCardClick?: (card: CardRecord) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
-  const synergy = deckCards.length > 0 ? computeSynergy(card, deckCards) : null;
+  const synergy = deckCards.length > 0 ? computeSynergy(card, deckCards.map(c => ({ card: c, quantity: 1, board: "main" as const }))) : null;
   const colors = JSON.parse(card.colorIdentityJson) as string[];
 
   return (
-    <div
-      className="flex flex-col gap-1 rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 hover:border-zinc-700"
-    >
+    <div className="flex flex-col gap-1 rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 hover:border-zinc-700">
       <div className="flex items-center gap-2">
         <button
-          onClick={() => setExpanded((v) => !v)}
+          onClick={() => {
+            if (onCardClick) onCardClick(card);
+            else setExpanded((v) => !v);
+          }}
           className="flex-1 text-left"
           aria-expanded={expanded}
         >
@@ -80,7 +83,7 @@ function CardRow({
         </button>
       </div>
 
-      {expanded && (
+      {expanded && !onCardClick && (
         <div className="mt-1 border-t border-zinc-800 pt-2 text-xs">
           {card.imageNormal && (
             <img
@@ -109,12 +112,12 @@ function CardRow({
   );
 }
 
-export function CardSearchPanel() {
+export function CardSearchPanel({ onCardClick }: { onCardClick?: (card: CardRecord) => void }) {
   const addCard = useDeckStore((s) => s.addCard);
   const entries = useDeckStore((s) => s.entries);
   const deckCards = entries
     .filter((e) => e.board === "main")
-    .flatMap((e) => Array<CardRecord>(e.quantity).fill(e.card));
+    .map((e) => e.card);
 
   const [query, setQuery] = useState("");
   const [colors, setColors] = useState<string[]>([]);
@@ -175,7 +178,7 @@ export function CardSearchPanel() {
     );
 
   return (
-    <div className="flex h-full flex-col gap-3">
+    <div className="flex h-full flex-col gap-3 p-3">
       {/* Search bar */}
       <div>
         <input
@@ -187,7 +190,7 @@ export function CardSearchPanel() {
         />
       </div>
 
-      {/* Filters */}
+      {/* Color filters */}
       <div className="flex flex-wrap gap-2">
         {COLORS.map((c) => (
           <button
@@ -204,6 +207,7 @@ export function CardSearchPanel() {
         ))}
       </div>
 
+      {/* Rarity filters */}
       <div className="flex flex-wrap gap-2">
         {RARITIES.map((r) => (
           <button
@@ -220,6 +224,7 @@ export function CardSearchPanel() {
         ))}
       </div>
 
+      {/* CMC + sort */}
       <div className="flex gap-2">
         <input
           type="number"
@@ -257,7 +262,8 @@ export function CardSearchPanel() {
             key={card.id}
             card={card}
             deckCards={deckCards}
-            onAdd={addCard}
+            onAdd={(c) => addCard(c, "main")}
+            onCardClick={onCardClick}
           />
         ))}
         {loading && (

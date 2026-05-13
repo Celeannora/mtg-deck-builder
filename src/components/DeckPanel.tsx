@@ -1,21 +1,23 @@
 import { useState } from "react";
 import { useDeckStore } from "../store/deckStore";
-import type { DeckCard } from "../store/deckStore";
+import type { DeckEntry } from "../lib/legality";
 
 type Board = "main" | "side";
 
-function DeckEntry({
+function DeckEntryRow({
   entry,
   onIncrement,
   onDecrement,
   onRemove,
   onMove,
+  onCardClick,
 }: {
-  entry: DeckCard;
+  entry: DeckEntry;
   onIncrement: () => void;
   onDecrement: () => void;
   onRemove: () => void;
   onMove: () => void;
+  onCardClick?: (card: DeckEntry["card"]) => void;
 }) {
   return (
     <div className="flex items-center gap-2 rounded-lg border border-zinc-800 bg-zinc-900 px-2 py-1.5">
@@ -39,7 +41,12 @@ function DeckEntry({
         </button>
       </div>
 
-      <span className="flex-1 truncate text-xs text-zinc-100">{entry.card.name}</span>
+      <button
+        className="flex-1 truncate text-left text-xs text-zinc-100 hover:text-teal-300"
+        onClick={() => onCardClick?.(entry.card)}
+      >
+        {entry.card.name}
+      </button>
 
       <span className="shrink-0 text-xs text-zinc-500">{entry.card.cmc || ""}</span>
 
@@ -62,8 +69,8 @@ function DeckEntry({
   );
 }
 
-export function DeckPanel() {
-  const { name, setName, entries, validation, removeCard, setQuantity, moveCard, clearDeck } =
+export function DeckPanel({ onCardClick }: { onCardClick?: (card: DeckEntry["card"]) => void }) {
+  const { deckName, setDeckName, entries, validation, removeCard, setQuantity, moveCard, clearDeck } =
     useDeckStore();
   const [activeBoard, setActiveBoard] = useState<Board>("main");
 
@@ -83,6 +90,10 @@ export function DeckPanel() {
     .filter((e) => e.board === "side")
     .reduce((s, e) => s + e.quantity, 0);
 
+  // Map rule → severity for inline banners
+  const errorRules = new Set(["MIN_60", "COPY_LIMIT", "NOT_STANDARD_LEGAL", "BANNED", "SIDEBOARD_SIZE"]);
+  const inlineViolations = validation.violations.slice(0, 3);
+
   const exportDecklist = () => {
     const main = entries.filter((e) => e.board === "main");
     const side = entries.filter((e) => e.board === "side");
@@ -92,17 +103,17 @@ export function DeckPanel() {
     const blob = new Blob([text], { type: "text/plain" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
-    a.download = `${name.replace(/\s+/g, "-")}.txt`;
+    a.download = `${deckName.replace(/\s+/g, "-")}.txt`;
     a.click();
   };
 
   return (
-    <div className="flex h-full flex-col gap-3">
+    <div className="flex h-full flex-col gap-3 p-3">
       {/* Header */}
       <div className="flex items-center gap-2">
         <input
-          value={name}
-          onChange={(e) => setName(e.target.value)}
+          value={deckName}
+          onChange={(e) => setDeckName(e.target.value)}
           className="flex-1 rounded border border-zinc-700 bg-transparent px-2 py-1 text-sm font-semibold text-zinc-100 focus:outline-none focus:border-teal-500"
           aria-label="Deck name"
         />
@@ -122,7 +133,7 @@ export function DeckPanel() {
         </button>
       </div>
 
-      {/* Tabs */}
+      {/* Board tabs */}
       <div className="flex gap-1">
         {(["main", "side"] as Board[]).map((b) => (
           <button
@@ -139,19 +150,19 @@ export function DeckPanel() {
         ))}
       </div>
 
-      {/* Validation issues */}
-      {validation && validation.issues.length > 0 && (
+      {/* Inline validation banners (top 3) */}
+      {inlineViolations.length > 0 && (
         <div className="space-y-1">
-          {validation.issues.slice(0, 3).map((issue, i) => (
+          {inlineViolations.map((v) => (
             <div
-              key={i}
+              key={v.rule}
               className={`rounded px-2 py-1 text-xs ${
-                issue.severity === "error"
+                errorRules.has(v.rule)
                   ? "bg-red-950/40 text-red-300"
                   : "bg-amber-950/40 text-amber-300"
               }`}
             >
-              {issue.message}
+              {v.message}
             </div>
           ))}
         </div>
@@ -168,9 +179,10 @@ export function DeckPanel() {
           </div>
         )}
         {boardEntries.map((entry) => (
-          <DeckEntry
+          <DeckEntryRow
             key={`${entry.card.oracleId}-${entry.board}`}
             entry={entry}
+            onCardClick={onCardClick}
             onIncrement={() =>
               setQuantity(entry.card.oracleId, entry.board, entry.quantity + 1)
             }

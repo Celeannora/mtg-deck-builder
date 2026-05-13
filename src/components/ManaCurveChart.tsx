@@ -1,11 +1,15 @@
 import { useMemo } from "react";
 import type { CurveSlot, ArchetypeCurveProfile } from "../lib/manaBase";
 import { IDEAL_CURVES } from "../lib/manaBase";
+import { useManaBaseStore } from "../lib/manaBaseStore";
+import { useDeckStore } from "../store/deckStore";
+import { buildManaCurve } from "../lib/manaBase";
+import { detectArchetype } from "../lib/archetype";
 
 interface Props {
-  curve: CurveSlot[];
-  archetypeProfile: ArchetypeCurveProfile;
-  avgMV: number;
+  curve?: CurveSlot[];
+  archetypeProfile?: ArchetypeCurveProfile;
+  avgMV?: number;
 }
 
 const TYPE_COLORS: Record<string, string> = {
@@ -20,10 +24,45 @@ const TYPE_COLORS: Record<string, string> = {
 
 const TYPE_KEYS = ["creatures", "instants", "sorceries", "enchantments", "artifacts", "planeswalkers", "other"] as const;
 
-export function ManaCurveChart({ curve, archetypeProfile, avgMV }: Props) {
+export function ManaCurveChart({ curve: propCurve, archetypeProfile: propProfile, avgMV: propAvgMV }: Props) {
+  // When called with no props (RightPanel Curve tab), derive from stores
+  const entries = useDeckStore((s) => s.entries);
+  const analysis = useManaBaseStore((s) => s.analysis);
+
+  const curve = useMemo(() => {
+    if (propCurve) return propCurve;
+    if (analysis) return analysis.curve;
+    return buildManaCurve(entries);
+  }, [propCurve, analysis, entries]);
+
+  const archetypeProfile: ArchetypeCurveProfile = useMemo(() => {
+    if (propProfile) return propProfile;
+    if (analysis) return analysis.archetypeProfile;
+    const detection = detectArchetype(entries);
+    const arch = detection.archetype.toLowerCase() as ArchetypeCurveProfile;
+    return (arch in IDEAL_CURVES) ? arch : "midrange";
+  }, [propProfile, analysis, entries]);
+
+  const avgMV = useMemo(() => {
+    if (propAvgMV !== undefined) return propAvgMV;
+    if (analysis) return analysis.avgMV;
+    const nonlands = entries.filter(e => !e.card.typeLine.includes("Land"));
+    const total = nonlands.reduce((s, e) => s + e.quantity, 0);
+    if (total === 0) return 0;
+    return Math.round(nonlands.reduce((s, e) => s + e.card.cmc * e.quantity, 0) / total * 100) / 100;
+  }, [propAvgMV, analysis, entries]);
+
   const maxTotal = useMemo(() => Math.max(...curve.map(s => s.total), 1), [curve]);
   const totalNonlands = useMemo(() => curve.reduce((s, c) => s + c.total, 0), [curve]);
   const idealCurve = IDEAL_CURVES[archetypeProfile];
+
+  if (entries.length === 0 && !propCurve) {
+    return (
+      <div className="flex items-center justify-center py-8 text-xs text-zinc-600">
+        Add cards to see mana curve
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col gap-3">

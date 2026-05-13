@@ -1,73 +1,97 @@
+import { useMemo } from "react";
 import { useDeckStore } from "../store/deckStore";
-import { ManaCurveChart } from "./ManaCurveChart";
-import { ArchetypePanel } from "./ArchetypePanel";
+import { useManaBaseStore } from "../lib/manaBaseStore";
+import { detectArchetype } from "../lib/archetype";
+
+const COLOR_SYMBOLS: Record<string, string> = {
+  W: "☀", U: "💧", B: "💀", R: "🔥", G: "🌿",
+};
 
 export function DeckStatsBar() {
-  const { archetypeResult, manaCurve, landRec, colorDist, validation } = useDeckStore();
+  const entries = useDeckStore((s) => s.entries);
+  const validation = useDeckStore((s) => s.validation);
+  const analysis = useManaBaseStore((s) => s.analysis);
 
-  if (!archetypeResult || !manaCurve) {
+  const mainCount = validation.mainCount;
+  const sideCount = validation.sideCount;
+  const isLegal = validation.legal;
+
+  const detection = useMemo(() => detectArchetype(entries), [entries]);
+
+  const colorCounts = useMemo(() => {
+    const counts: Record<string, number> = { W: 0, U: 0, B: 0, R: 0, G: 0 };
+    for (const entry of entries.filter((e) => e.board === "main")) {
+      const colors: string[] = JSON.parse(entry.card.colorIdentityJson || "[]");
+      for (const c of colors) {
+        if (c in counts) counts[c] += entry.quantity;
+      }
+    }
+    return counts;
+  }, [entries]);
+
+  const totalPips = Object.values(colorCounts).reduce((s, n) => s + n, 0);
+
+  if (entries.length === 0) {
     return (
-      <div className="flex items-center justify-center h-full text-xs text-zinc-600">
+      <div className="flex items-center justify-center py-3 text-xs text-zinc-600 border-b border-zinc-800">
         Add cards to see stats
       </div>
     );
   }
 
   return (
-    <div className="flex flex-col gap-3 overflow-y-auto h-full">
-      <ArchetypePanel result={archetypeResult} />
-      <ManaCurveChart curve={manaCurve} />
-
-      {landRec && (
-        <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-4">
-          <p className="text-sm font-semibold text-zinc-100 mb-1">Land Count</p>
-          <p className="text-xs text-zinc-300">{landRec.breakdown}</p>
-          <p className="text-xs text-zinc-500 mt-1">{landRec.rationale}</p>
-        </div>
-      )}
-
-      {colorDist && colorDist.pips.length > 0 && (
-        <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-4">
-          <p className="text-sm font-semibold text-zinc-100 mb-2">Color Distribution</p>
-          <div className="space-y-1.5">
-            {colorDist.pips.map((pip) => (
-              <div key={pip.color} className="flex items-center gap-2">
-                <span className="w-6 text-xs text-zinc-400">{pip.color}</span>
-                <div className="flex-1 overflow-hidden rounded-full bg-zinc-800 h-2">
-                  <div
-                    className="h-full rounded-full bg-teal-500"
-                    style={{ width: `${Math.round(pip.fraction * 100)}%` }}
-                  />
-                </div>
-                <span className="w-8 text-right text-xs text-zinc-400">{pip.count}</span>
-              </div>
-            ))}
-          </div>
-          {colorDist.landSplit && (
-            <p className="mt-2 text-xs text-zinc-500">
-              Land split:{" "}
-              {Object.entries(colorDist.landSplit)
-                .map(([k, v]) => `${v} ${k}`)
-                .join(", ")}
-            </p>
-          )}
-        </div>
-      )}
-
-      {validation && (
-        <div
-          className={`rounded-xl border p-4 ${
-            validation.valid
-              ? "border-emerald-800 bg-emerald-950/30"
-              : "border-red-800 bg-red-950/30"
+    <div className="flex items-center gap-4 border-b border-zinc-800 bg-zinc-950 px-3 py-2 text-xs">
+      {/* Deck size + legality */}
+      <div className="flex items-center gap-1.5">
+        <span
+          className={`font-mono font-semibold ${
+            mainCount === 60 ? "text-emerald-400" : mainCount < 60 ? "text-red-400" : "text-yellow-400"
           }`}
         >
-          <p className="text-sm font-semibold text-zinc-100 mb-1">
-            {validation.valid ? "✓ Valid Deck" : "✗ Illegal Deck"}
-          </p>
-          <p className="text-xs text-zinc-400">
-            {validation.mainCount}/60 main · {validation.sideCount}/15 side
-          </p>
+          {mainCount}/60
+        </span>
+        {sideCount > 0 && (
+          <span className={`font-mono ${sideCount === 15 ? "text-zinc-400" : "text-red-400"}`}>
+            +{sideCount}
+          </span>
+        )}
+        <span className={isLegal ? "text-emerald-500" : "text-red-500"}>
+          {isLegal ? "✓" : "✗"}
+        </span>
+      </div>
+
+      {/* Archetype */}
+      <div className="flex items-center gap-1">
+        <span className="text-zinc-400">Arch:</span>
+        <span className="text-teal-300 font-medium">{detection.archetype}</span>
+        <span className="text-zinc-600">{Math.round(detection.confidence * 100)}%</span>
+      </div>
+
+      {/* Avg MV */}
+      {analysis && (
+        <div className="flex items-center gap-1">
+          <span className="text-zinc-400">Avg MV:</span>
+          <span className="text-zinc-200 font-mono">{analysis.avgMV}</span>
+        </div>
+      )}
+
+      {/* Color pips */}
+      {totalPips > 0 && (
+        <div className="flex items-center gap-1">
+          {Object.entries(colorCounts)
+            .filter(([, n]) => n > 0)
+            .sort((a, b) => b[1] - a[1])
+            .map(([c]) => (
+              <span key={c} title={c}>{COLOR_SYMBOLS[c] ?? c}</span>
+            ))}
+        </div>
+      )}
+
+      {/* Violation count badge */}
+      {validation.violations.length > 0 && (
+        <div className="ml-auto flex items-center gap-1 rounded bg-red-950/60 px-1.5 py-0.5 text-red-300">
+          <span>⚠</span>
+          <span>{validation.violations.length} issue{validation.violations.length > 1 ? "s" : ""}</span>
         </div>
       )}
     </div>
