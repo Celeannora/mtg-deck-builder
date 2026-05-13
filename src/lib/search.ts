@@ -1,171 +1,154 @@
 import { db } from "./db";
 import type { CardRecord } from "./types";
 
-export interface SearchFilters {
-  query?: string;
+export interface CardFilters {
+  name?: string;
+  oracleText?: string;
   types?: string[];
-  subtype?: string;
-  supertype?: string;
   colors?: string[];
-  colorMode?: "exactly" | "includes" | "at-most";
-  colorless?: boolean;
+  colorMode?: "includes" | "exactly" | "atMost";
   cmcMin?: number;
   cmcMax?: number;
-  powerMin?: number;
-  powerMax?: number;
-  keywords?: string[];
-  sets?: string[];
   rarities?: string[];
-  roles?: string[];
+  sets?: string[];
+  keywords?: string[];
+  legalityStandard?: "legal" | "future";
   maxPriceUsd?: number;
-  sortBy?: "name" | "cmc" | "price" | "rarity" | "edhrecRank";
+  sortBy?: "name" | "cmc" | "priceUsd" | "edhrecRank";
   sortDir?: "asc" | "desc";
-  limit?: number;
-  offset?: number;
+  page?: number;
+  pageSize?: number;
 }
 
-const RARITY_ORDER: Record<string, number> = {
-  common: 1,
-  uncommon: 2,
-  rare: 3,
-  mythic: 4,
-};
+const PAGE_SIZE_DEFAULT = 50;
 
-export async function searchCards(filters: SearchFilters): Promise<CardRecord[]> {
-  let collection = db.cards.where("legalityStandard").equals("legal");
-
-  // Pull into memory for complex filtering (IndexedDB lacks SQL-level expressions)
-  let cards = await collection.toArray();
-
-  const q = filters.query?.toLowerCase().trim();
-  if (q) {
-    cards = cards.filter(
-      (c) =>
-        c.name.toLowerCase().includes(q) ||
-        (c.oracleText ?? "").toLowerCase().includes(q) ||
-        c.typeLine.toLowerCase().includes(q) ||
-        c.searchText.includes(q)
+function matchesColors(
+  record: CardRecord,
+  colors: string[],
+  mode: "includes" | "exactly" | "atMost"
+): boolean {
+  const cardColors: string[] = JSON.parse(record.colorsJson ?? "[]");
+  if (mode === "exactly") {
+    return (
+      cardColors.length === colors.length &&
+      colors.every((c) => cardColors.includes(c))
     );
   }
-
-  if (filters.types && filters.types.length > 0) {
-    cards = cards.filter((c) =>
-      filters.types!.some((t) => c.typeLine.toLowerCase().includes(t.toLowerCase()))
-    );
+  if (mode === "includes") {
+    return colors.every((c) => cardColors.includes(c));
   }
+  return cardColors.every((c) => colors.includes(c));
+}
 
-  if (filters.subtype) {
-    const st = filters.subtype.toLowerCase();
-    cards = cards.filter((c) => c.typeLine.toLowerCase().includes(st));
-  }
+export interface SearchResult {
+  cards: CardRecord[];
+  total: number;
+  page: number;
+  pageSize: number;
+  pages: number;
+}
 
-  if (filters.supertype) {
-    const sup = filters.supertype.toLowerCase();
-    cards = cards.filter((c) => c.typeLine.toLowerCase().includes(sup));
-  }
+export async function searchCards(
+  filters: CardFilters
+): Promise<SearchResult> {
+  const {
+    name,
+    oracleText,
+    types,
+    colors,
+    colorMode = "includes",
+    cmcMin,
+    cmcMax,
+    rarities,
+    sets,
+    keywords,
+    legalityStandard = "legal",
+    maxPriceUsd,
+    sortBy = "name",
+    sortDir = "asc",
+    page = 1,
+    pageSize = PAGE_SIZE_DEFAULT,
+  } = filters;
 
-  if (filters.colorless) {
-    cards = cards.filter((c) => {
-      const colors = JSON.parse(c.colorsJson) as string[];
-      return colors.length === 0;
-    });
-  } else if (filters.colors && filters.colors.length > 0) {
-    const fc = filters.colors;
-    const mode = filters.colorMode ?? "includes";
-    cards = cards.filter((c) => {
-      const colors = JSON.parse(c.colorIdentityJson) as string[];
-      if (mode === "exactly") {
-        return (
-          fc.length === colors.length && fc.every((x) => colors.includes(x))
-        );
-      } else if (mode === "includes") {
-        return fc.every((x) => colors.includes(x));
-      } else {
-        // at-most
-        return colors.every((x) => fc.includes(x));
+  const collection = db.cards
+    .where("legalityStandard")
+    .equals(legalityStandard);
+
+  const results = await collection
+    .filter((card) => {
+      if (name?.trim()) {
+        const q = name.trim().toLowerCase();
+        if (!card.name.toLowerCase().includes(q)) return false;
       }
-    });
-  }
+      if (oracleText?.trim()) {
+        const q = oracleText.trim().toLowerCase();
+        if (!(card.oracleText ?? "").toLowerCase().includes(q)) return false;
+      }
+      if (types && types.length > 0) {
+        if (!types.every((t) => card.typeLine.includes(t))) return false;
+      }
+      if (cmcMin !== undefined && card.cmc < cmcMin) return false;
+      if (cmcMax !== undefined && card.cmc > cmcMax) return false;
+      if (rarities && rarities.length > 0) {
+        if (!rarities.includes(card.rarity ?? "")) return false;
+      }
+      if (sets && sets.length > 0) {
+        if (!sets.includes(card.setCode)) return false;
+      }
+      if (keywords && keywords.length > 0) {
+        const cardKw: string[] = JSON.parse(card.keywordsJson ?? "[]");
+        if (!keywords.every((k) => cardKw.includes(k))) return false;
+      }
+      if (colors && colors.length > 0) {
+        if (!matchesColors(card, colors, colorMode)) return false;
+      }
+      if (maxPriceUsd !== undefined && maxPriceUsd > 0) {
+        if ((card.priceUsd ?? Infinity) > maxPriceUsd) return false;
+      }
+      return true;
+    })
+    .toArray();
 
-  if (filters.cmcMin !== undefined) {
-    cards = cards.filter((c) => c.cmc >= filters.cmcMin!);
-  }
-  if (filters.cmcMax !== undefined) {
-    cards = cards.filter((c) => c.cmc <= filters.cmcMax!);
-  }
-
-  if (filters.powerMin !== undefined) {
-    cards = cards.filter((c) => {
-      const p = parseFloat(c.power ?? "");
-      return !isNaN(p) && p >= filters.powerMin!;
-    });
-  }
-  if (filters.powerMax !== undefined) {
-    cards = cards.filter((c) => {
-      const p = parseFloat(c.power ?? "");
-      return !isNaN(p) && p <= filters.powerMax!;
-    });
-  }
-
-  if (filters.keywords && filters.keywords.length > 0) {
-    cards = cards.filter((c) => {
-      const kws = JSON.parse(c.keywordsJson) as string[];
-      return filters.keywords!.every((kw) => kws.includes(kw));
-    });
-  }
-
-  if (filters.sets && filters.sets.length > 0) {
-    cards = cards.filter((c) => filters.sets!.includes(c.setCode));
-  }
-
-  if (filters.rarities && filters.rarities.length > 0) {
-    cards = cards.filter((c) => filters.rarities!.includes(c.rarity ?? ""));
-  }
-
-  if (filters.maxPriceUsd !== undefined) {
-    cards = cards.filter(
-      (c) => c.priceUsd !== null && c.priceUsd <= filters.maxPriceUsd!
-    );
-  }
-
-  // Sort
-  const dir = filters.sortDir === "asc" ? 1 : -1;
-  cards.sort((a, b) => {
-    switch (filters.sortBy) {
-      case "name": return dir * a.name.localeCompare(b.name);
-      case "cmc": return dir * (a.cmc - b.cmc);
-      case "price": return dir * ((a.priceUsd ?? 0) - (b.priceUsd ?? 0));
-      case "rarity":
-        return dir * ((RARITY_ORDER[a.rarity ?? "common"] ?? 0) - (RARITY_ORDER[b.rarity ?? "common"] ?? 0));
+  const dir = sortDir === "desc" ? -1 : 1;
+  results.sort((a, b) => {
+    switch (sortBy) {
+      case "cmc":
+        return dir * (a.cmc - b.cmc);
+      case "priceUsd":
+        return dir * ((a.priceUsd ?? 0) - (b.priceUsd ?? 0));
       case "edhrecRank":
-        return dir * ((a.edhrecRank ?? 99999) - (b.edhrecRank ?? 99999));
+        return dir * ((a.edhrecRank ?? 999999) - (b.edhrecRank ?? 999999));
       default:
-        return a.name.localeCompare(b.name);
+        return dir * a.name.localeCompare(b.name);
     }
   });
 
-  const offset = filters.offset ?? 0;
-  const limit = filters.limit ?? 50;
-  return cards.slice(offset, offset + limit);
+  const total = results.length;
+  const pages = Math.max(1, Math.ceil(total / pageSize));
+  const clampedPage = Math.min(Math.max(page, 1), pages);
+  const offset = (clampedPage - 1) * pageSize;
+  const slice = results.slice(offset, offset + pageSize);
+
+  return { cards: slice, total, page: clampedPage, pageSize, pages };
 }
 
-export async function getDistinctKeywords(): Promise<string[]> {
+export async function getAllKeywords(): Promise<string[]> {
   const all = await db.cards.toArray();
-  const kwSet = new Set<string>();
+  const set = new Set<string>();
   for (const card of all) {
-    const kws = JSON.parse(card.keywordsJson) as string[];
-    for (const kw of kws) kwSet.add(kw);
+    const kw: string[] = JSON.parse(card.keywordsJson ?? "[]");
+    kw.forEach((k) => set.add(k));
   }
-  return [...kwSet].sort();
+  return Array.from(set).sort();
 }
 
-export async function getStandardSets(): Promise<Array<{ code: string; name: string }>> {
+export async function getAllSetCodes(): Promise<
+  { code: string; name: string }[]
+> {
   const all = await db.cards.toArray();
-  const seen = new Map<string, string>();
-  for (const card of all) {
-    if (!seen.has(card.setCode)) seen.set(card.setCode, card.setName);
-  }
-  return [...seen.entries()]
+  const map = new Map<string, string>();
+  for (const card of all) map.set(card.setCode, card.setName);
+  return Array.from(map.entries())
     .map(([code, name]) => ({ code, name }))
     .sort((a, b) => a.name.localeCompare(b.name));
 }
