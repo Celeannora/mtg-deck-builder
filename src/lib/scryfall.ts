@@ -1,4 +1,4 @@
-import type { CardRecord, ScryfallCard, ScryfallCardFace, SetRecord } from "./types";
+import type { CardRecord, ScryfallCard, ScryfallCardFace } from "./types";
 
 const EXCLUDED_SET_TYPES = new Set(["token", "memorabilia", "minigame"]);
 const EXCLUDED_TYPE_TERMS = [
@@ -6,7 +6,7 @@ const EXCLUDED_TYPE_TERMS = [
   "Scheme",
   "Vanguard",
   "Conspiracy",
-  "Art Series",
+  "Art Series"
 ];
 
 function safeJson(value: unknown): string {
@@ -32,9 +32,7 @@ function getNormalImage(card: ScryfallCard): string | null {
 function mergeFaceText(cardFaces?: ScryfallCardFace[]): string | null {
   if (!cardFaces?.length) return null;
   const text = cardFaces
-    .map((f) =>
-      [f.name, f.type_line, f.oracle_text].filter(Boolean).join(" — ")
-    )
+    .map((f) => [f.name, f.type_line, f.oracle_text].filter(Boolean).join(" — "))
     .filter(Boolean)
     .join("\n//\n");
   return text || null;
@@ -52,24 +50,20 @@ export function isStandardEligible(card: ScryfallCard): boolean {
   return true;
 }
 
-export function toCardRecord(
-  card: ScryfallCard,
-  importedAt: string
-): CardRecord {
-  const oracleText =
-    card.oracle_text ?? mergeFaceText(card.card_faces) ?? null;
+export function toCardRecord(card: ScryfallCard, importedAt: string): CardRecord {
+  const oracleText = card.oracle_text ?? mergeFaceText(card.card_faces) ?? null;
   const keywords = card.keywords ?? [];
   const colors = card.colors ?? [];
   const colorIdentity = card.color_identity ?? [];
   const producedMana = card.produced_mana ?? [];
   const imageNormal = getNormalImage(card);
 
-  const searchText = [
+  const searchParts = [
     card.name,
     card.type_line,
     oracleText ?? "",
     keywords.join(" "),
-    card.flavor_text ?? "",
+    card.flavor_text ?? ""
   ]
     .join(" ")
     .trim()
@@ -82,6 +76,7 @@ export function toCardRecord(
     lang: card.lang,
     layout: card.layout,
     cardFacesJson: card.card_faces ? JSON.stringify(card.card_faces) : null,
+
     manaCost: card.mana_cost ?? null,
     cmc: Number(card.cmc ?? 0),
     colorsJson: safeJson(colors),
@@ -93,42 +88,28 @@ export function toCardRecord(
     toughness: card.toughness ?? null,
     loyalty: card.loyalty ?? null,
     producedManaJson: safeJson(producedMana),
+
     legalityStandard: card.legalities?.standard ?? null,
     legalityFuture: card.legalities?.future ?? null,
     bannedInStandard: card.legalities?.standard === "banned" ? 1 : 0,
+
     setCode: card.set,
     setName: card.set_name,
     setType: card.set_type ?? null,
     collectorNumber: card.collector_number ?? null,
     rarity: card.rarity ?? null,
-    releasedAt: card.released_at ?? null,
+
     imageNormal,
     priceUsd: parsePrice(card.prices?.usd),
     priceUsdFoil: parsePrice(card.prices?.usd_foil),
     priceEur: parsePrice(card.prices?.eur),
     edhrecRank: card.edhrec_rank ?? null,
     gameChanger: card.game_changer ? 1 : 0,
+
     flavorText: card.flavor_text ?? null,
     artist: card.artist ?? null,
-    searchText,
-    importedAt,
-  };
-}
 
-export function extractSetsFromCards(cards: CardRecord[], importedAt: string): SetRecord[] {
-  const seen = new Map<string, SetRecord>();
-  for (const card of cards) {
-    if (!seen.has(card.setCode)) {
-      seen.set(card.setCode, {
-        code: card.setCode,
-        name: card.setName,
-        releaseDate: card.releasedAt,
-        setType: card.setType,
-        importedAt,
-      });
-    }
-  }
-  return [...seen.values()].sort((a, b) =>
-    (b.releaseDate ?? "").localeCompare(a.releaseDate ?? "")
-  );
+    searchText: searchParts,
+    importedAt
+  };
 }
