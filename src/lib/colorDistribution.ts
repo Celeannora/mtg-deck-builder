@@ -1,88 +1,73 @@
 import type { CardRecord } from "./types";
 
-export type ManaColor = "W" | "U" | "B" | "R" | "G" | "C";
-
-export interface PipCount {
-  W: number;
-  U: number;
-  B: number;
-  R: number;
-  G: number;
-  C: number;
-  total: number;
+export interface ColorPip {
+  color: "W" | "U" | "B" | "R" | "G";
+  count: number;
+  fraction: number;
 }
 
 export interface ColorDistribution {
-  pips: PipCount;
-  ratios: Record<ManaColor, number>;
-  recommendedSources: Record<ManaColor, number>;
-  totalLands: number;
-  insufficientColors: ManaColor[];
+  pips: ColorPip[];
+  landSplit: Record<string, number>;
+  sources: Record<string, number>;
 }
 
-const HYBRID_RE = /\{([WUBRG])\/([WUBRG])\}/g;
-const PHYREXIAN_RE = /\{([WUBRG])\/P\}/g;
-const COLORED_RE = /\{([WUBRG])\}/g;
+const COLOR_NAMES: Record<string, string> = {
+  W: "White",
+  U: "Blue",
+  B: "Black",
+  R: "Red",
+  G: "Green",
+};
 
-export function parsePips(manaCost: string): PipCount {
-  const pips: PipCount = { W: 0, U: 0, B: 0, R: 0, G: 0, C: 0, total: 0 };
+const BASIC_LANDS: Record<string, string> = {
+  Plains: "W",
+  Island: "U",
+  Swamp: "B",
+  Mountain: "R",
+  Forest: "G",
+};
 
-  for (const match of manaCost.matchAll(HYBRID_RE)) {
-    const c1 = match[1] as ManaColor;
-    const c2 = match[2] as ManaColor;
-    pips[c1] += 0.5;
-    pips[c2] += 0.5;
-    pips.total += 1;
+function countManaCostPips(manaCost: string | null): Record<string, number> {
+  if (!manaCost) return {};
+  const counts: Record<string, number> = {};
+  const matches = manaCost.matchAll(/\{([WUBRG])\}/g);
+  for (const m of matches) {
+    counts[m[1]] = (counts[m[1]] ?? 0) + 1;
   }
-
-  for (const match of manaCost.matchAll(PHYREXIAN_RE)) {
-    const c = match[1] as ManaColor;
-    pips[c] += 0.5;
-    pips.total += 0.5;
-  }
-
-  const stripped = manaCost.replace(HYBRID_RE, "").replace(PHYREXIAN_RE, "");
-  for (const match of stripped.matchAll(COLORED_RE)) {
-    const c = match[1] as ManaColor;
-    pips[c] += 1;
-    pips.total += 1;
-  }
-
-  return pips;
+  return counts;
 }
 
 export function computeColorDistribution(
-  cards: CardRecord[],
+  spells: CardRecord[],
   totalLands: number
 ): ColorDistribution {
-  const totalPips: PipCount = { W: 0, U: 0, B: 0, R: 0, G: 0, C: 0, total: 0 };
+  const totalPips: Record<string, number> = {};
 
-  for (const card of cards) {
-    if (!card.manaCost) continue;
-    const pips = parsePips(card.manaCost);
-    for (const color of ["W", "U", "B", "R", "G", "C"] as ManaColor[]) {
-      totalPips[color] += pips[color];
-    }
-    totalPips.total += pips.total;
-  }
-
-  const ratios: Record<ManaColor, number> = { W: 0, U: 0, B: 0, R: 0, G: 0, C: 0 };
-  const recommendedSources: Record<ManaColor, number> = { W: 0, U: 0, B: 0, R: 0, G: 0, C: 0 };
-
-  if (totalPips.total > 0) {
-    for (const color of ["W", "U", "B", "R", "G", "C"] as ManaColor[]) {
-      ratios[color] = totalPips[color] / totalPips.total;
-      recommendedSources[color] = Math.round(ratios[color] * totalLands);
+  for (const card of spells) {
+    const pips = countManaCostPips(card.manaCost);
+    for (const [color, count] of Object.entries(pips)) {
+      totalPips[color] = (totalPips[color] ?? 0) + count;
     }
   }
 
-  const activeColors = (["W", "U", "B", "R", "G"] as ManaColor[]).filter(
-    (c) => totalPips[c] > 0
-  );
-  const MIN_SOURCES = activeColors.length >= 3 ? 6 : 8;
-  const insufficientColors = activeColors.filter(
-    (c) => recommendedSources[c] < MIN_SOURCES
-  );
+  const grandTotal = Object.values(totalPips).reduce((s, v) => s + v, 0);
 
-  return { pips: totalPips, ratios, recommendedSources, totalLands, insufficientColors };
+  const pips: ColorPip[] = Object.entries(totalPips)
+    .map(([color, count]) => ({
+      color: color as ColorPip["color"],
+      count,
+      fraction: grandTotal > 0 ? count / grandTotal : 0,
+    }))
+    .sort((a, b) => b.count - a.count);
+
+  const landSplit: Record<string, number> = {};
+  const sources: Record<string, number> = {};
+  for (const pip of pips) {
+    const landCount = Math.round(pip.fraction * totalLands);
+    landSplit[COLOR_NAMES[pip.color] ?? pip.color] = landCount;
+    sources[pip.color] = landCount;
+  }
+
+  return { pips, landSplit, sources };
 }
