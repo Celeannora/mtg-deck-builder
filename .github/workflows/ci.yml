@@ -25,12 +25,6 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      # @vitest/coverage-v8 is a required peer dep for `provider: "v8"`.
-      # Explicitly install it so CI never fails with "Could not find coverage provider".
-      # Remove this step once package.json + package-lock.json are committed to the repo.
-      - name: Ensure coverage provider is installed
-        run: npm install --no-save @vitest/coverage-v8
-
       - name: Lint
         run: npx eslint . --max-warnings 0
 
