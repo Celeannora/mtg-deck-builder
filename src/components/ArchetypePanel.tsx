@@ -1,95 +1,163 @@
 import { useMemo } from "react";
-import { useDeckStore } from "../store/deckStore";
-import { detectArchetype } from "../lib/archetype";
-import { analyzeDeckComposition } from "../lib/deckComposition";
+import { useDeckStore } from "../lib/deckStore";
+import { detectArchetype, getRoleComposition, ARCHETYPE_BENCHMARKS } from "../lib/archetype";
+import { getDeckMechanics } from "../lib/synergy";
+import { scoreDeck } from "../lib/scoring";
+import type { DeckEntry } from "../lib/legality";
 
-const TRAFFIC_COLORS = {
-  green:  "text-emerald-400",
-  yellow: "text-yellow-400",
-  red:    "text-red-400"
+const ARCHETYPE_COLOR: Record<string, string> = {
+  Aggro:     "text-red-400",
+  Burn:      "text-orange-400",
+  Midrange:  "text-amber-400",
+  Control:   "text-blue-400",
+  Combo:     "text-purple-400",
+  Tempo:     "text-cyan-400",
+  Ramp:      "text-green-400",
+  Tokens:    "text-yellow-400",
+  Graveyard: "text-zinc-400",
+  Sacrifice: "text-rose-400",
+  Unknown:   "text-zinc-500",
 };
 
-const TRAFFIC_BG = {
-  green:  "bg-emerald-900/30",
-  yellow: "bg-yellow-900/30",
-  red:    "bg-red-900/30"
-};
+const ROLE_LABELS: Array<{ key: string; label: string }> = [
+  { key: "threats",      label: "Threats" },
+  { key: "removal",      label: "Removal" },
+  { key: "boardWipes",   label: "Board Wipes" },
+  { key: "counterspells",label: "Counterspells" },
+  { key: "cardDraw",     label: "Card Draw" },
+  { key: "ramp",         label: "Ramp" },
+  { key: "lands",        label: "Lands" },
+];
+
+function confidenceBar(pct: number) {
+  return (
+    <div className="h-1.5 w-full bg-zinc-800 rounded-full overflow-hidden">
+      <div
+        className="h-full bg-teal-500 rounded-full transition-all"
+        style={{ width: `${Math.round(pct * 100)}%` }}
+      />
+    </div>
+  );
+}
 
 export function ArchetypePanel() {
-  const { entries } = useDeckStore();
+  const entries = useDeckStore(s => s.entries) as DeckEntry[];
+  const mainboard = useMemo(() => entries.filter(e => e.zone === "main"), [entries]);
 
-  const detection = useMemo(() => detectArchetype(entries), [entries]);
-  const composition = useMemo(
-    () => analyzeDeckComposition(entries, detection.archetype),
-    [entries, detection.archetype]
-  );
+  const detection = useMemo(() => detectArchetype(mainboard), [mainboard]);
+  const comp = useMemo(() => getRoleComposition(mainboard), [mainboard]);
+  const mechanics = useMemo(() => getDeckMechanics(mainboard), [mainboard]);
+  const scores = useMemo(() => scoreDeck(mainboard).slice(0, 5), [mainboard]);
 
-  const confidencePct = Math.round(detection.confidence * 100);
+  const benchmark = ARCHETYPE_BENCHMARKS[detection.archetype] ?? {};
 
-  if (entries.length === 0) {
+  if (mainboard.length === 0) {
     return (
-      <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-4 text-sm text-zinc-400">
-        Add cards to detect archetype.
+      <div className="flex flex-col items-center justify-center py-16 text-zinc-500 text-sm">
+        <p>Add cards to detect archetype.</p>
       </div>
     );
   }
 
   return (
-    <div className="flex flex-col gap-4 rounded-xl border border-zinc-800 bg-zinc-950 p-4 text-sm text-zinc-100">
+    <div className="space-y-6 text-sm">
 
-      {/* Archetype header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <span className="text-lg font-bold text-teal-400">{detection.archetype}</span>
-          <span className="ml-2 text-xs text-zinc-500">{confidencePct}% confidence</span>
+      {/* Archetype detection */}
+      <section>
+        <div className="flex items-center justify-between mb-1">
+          <h3 className="font-semibold text-zinc-200">Detected Archetype</h3>
+          <span className={`text-lg font-bold ${ARCHETYPE_COLOR[detection.archetype]}`}>
+            {detection.archetype}
+          </span>
         </div>
-        <div className="h-2 w-24 rounded-full bg-zinc-800 overflow-hidden">
-          <div className="h-full bg-teal-500 rounded-full" style={{ width: `${confidencePct}%` }} />
+        <div className="flex items-center gap-2">
+          {confidenceBar(detection.confidence)}
+          <span className="text-zinc-500 whitespace-nowrap">
+            {Math.round(detection.confidence * 100)}% confidence
+          </span>
         </div>
-      </div>
+        {detection.signals.length > 0 && (
+          <ul className="mt-2 space-y-0.5 text-zinc-500">
+            {detection.signals.map((s, i) => <li key={i}>· {s}</li>)}
+          </ul>
+        )}
+      </section>
 
-      {/* Detection signals */}
-      {detection.signals.length > 0 && (
-        <div className="flex flex-col gap-0.5">
-          {detection.signals.map((s, i) => (
-            <div key={i} className="text-xs text-zinc-400">→ {s}</div>
-          ))}
+      {/* Role composition vs benchmark */}
+      <section>
+        <h3 className="font-semibold text-zinc-200 mb-2">Role Composition</h3>
+        <div className="space-y-2">
+          {ROLE_LABELS.map(({ key, label }) => {
+            const actual = (comp as Record<string, number>)[key] ?? 0;
+            const target = (benchmark as Record<string, number>)[key] ?? 0;
+            const pct = target > 0 ? Math.min(actual / target, 1) : actual > 0 ? 1 : 0;
+            const ok = target === 0 || (actual >= target * 0.75);
+
+            return (
+              <div key={key} className="flex items-center gap-3">
+                <span className="w-28 text-zinc-400 shrink-0">{label}</span>
+                <div className="flex-1 h-2 bg-zinc-800 rounded-full overflow-hidden">
+                  <div
+                    className={`h-full rounded-full transition-all ${
+                      ok ? "bg-teal-500" : "bg-amber-500"
+                    }`}
+                    style={{ width: `${Math.round(pct * 100)}%` }}
+                  />
+                </div>
+                <span className="text-zinc-400 w-24 text-right">
+                  {actual}
+                  {target > 0 && (
+                    <span className="text-zinc-600"> / {target}</span>
+                  )}
+                </span>
+              </div>
+            );
+          })}
         </div>
+      </section>
+
+      {/* Mechanics fingerprint */}
+      {mechanics.length > 0 && (
+        <section>
+          <h3 className="font-semibold text-zinc-200 mb-2">Mechanics</h3>
+          <div className="flex flex-wrap gap-1.5">
+            {mechanics.map(m => (
+              <span
+                key={m}
+                className="rounded-full bg-zinc-800 px-2.5 py-0.5 text-xs capitalize text-zinc-300"
+              >
+                {m}
+              </span>
+            ))}
+          </div>
+        </section>
       )}
 
-      {/* Role composition vs benchmarks */}
-      <div className="border-t border-zinc-800 pt-3">
-        <div className="text-xs text-zinc-500 uppercase tracking-wide mb-2">Role Composition</div>
-        <div className="flex flex-col gap-1">
-          {composition.checks.map(check => (
-            <div key={check.label} className={`flex items-center gap-2 rounded px-2 py-1 ${TRAFFIC_BG[check.status]}`}>
-              <span className={`text-xs font-mono w-4 text-center ${TRAFFIC_COLORS[check.status]}`}>
-                {check.status === "green" ? "●" : check.status === "yellow" ? "◐" : "○"}
-              </span>
-              <span className="flex-1 text-zinc-300">{check.label}</span>
-              <span className="font-mono text-xs text-zinc-400">{check.actual}</span>
-              <span className="text-zinc-600 text-xs">/</span>
-              <span className="font-mono text-xs text-zinc-500">{check.target}</span>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Weak spots */}
-      {composition.weakSpots.length > 0 && (
-        <div className="border-t border-zinc-800 pt-3">
-          <div className="text-xs text-zinc-500 uppercase tracking-wide mb-2">Weak Spots</div>
-          <div className="flex flex-col gap-1.5">
-            {composition.weakSpots.map((ws, i) => (
-              <div key={i} className="flex items-start gap-2 text-xs">
-                <span className="text-yellow-500 mt-0.5">⚠</span>
-                <span className="text-zinc-300">{ws}</span>
+      {/* Top card scores */}
+      {scores.length > 0 && (
+        <section>
+          <h3 className="font-semibold text-zinc-200 mb-2">Top Cards by Score</h3>
+          <div className="space-y-1.5">
+            {scores.map(s => (
+              <div
+                key={s.cardId}
+                className="flex items-center justify-between rounded-md bg-zinc-800 px-3 py-1.5"
+              >
+                <span className="text-zinc-100">{s.cardName}</span>
+                <div className="flex items-center gap-2">
+                  <span className={`text-xs font-bold ${
+                    s.grade === "S" ? "text-yellow-400" :
+                    s.grade === "A" ? "text-teal-400" :
+                    s.grade === "B" ? "text-blue-400" :
+                    s.grade === "C" ? "text-zinc-400" : "text-red-400"
+                  }`}>{s.grade}</span>
+                  <span className="text-zinc-500">{s.total}</span>
+                </div>
               </div>
             ))}
           </div>
-        </div>
+        </section>
       )}
-
     </div>
   );
 }

@@ -1,52 +1,55 @@
-import type { CardRecord } from "./types";
+/**
+ * powerSignal.ts — Role-alignment signal (0–30)
+ *
+ * Measures how well a card's role matches the current deck's role composition.
+ * Uses the archetype composition to determine what roles are most needed.
+ */
 
-export interface PowerSignalResult {
-  powerScore: number;   // 0-10
-  synergyScore: number; // 0-10 (normalized from raw synergy)
-  cardScore: number;    // combined 0-10
-  breakdown: string[];
-}
+import type { CardRecord } from "./types";
+import type { DeckEntry } from "./legality";
+import { assignRoles } from "./roles";
+import { getRoleComposition } from "./archetype";
 
 /**
- * Compute raw power signal for a card independent of any deck.
- * Synergy score (0-20 raw from synergy.ts) is passed in normalized.
+ * Returns a signal score 0–30 representing how well this card
+ * fills a role that the current deck needs.
  */
-export function computePowerSignal(
+export function getPowerSignal(
   card: CardRecord,
-  rawSynergyScore: number // 0-20
-): PowerSignalResult {
-  const breakdown: string[] = [];
-  let powerScore = 0;
+  deckEntries: DeckEntry[]
+): number {
+  if (deckEntries.length === 0) return 10; // neutral when no deck
 
-  // EDHREC rank: normalize to 0-8 (lower rank = higher signal)
-  if (card.edhrecRank != null) {
-    const normalized = Math.max(0, 8 - (card.edhrecRank / 500));
-    powerScore += normalized;
-    breakdown.push(`EDHREC rank ${card.edhrecRank} → +${normalized.toFixed(1)}`);
+  const comp = getRoleComposition(deckEntries);
+  const total = Math.max(comp.total, 1);
+  const roles = assignRoles(card);
+
+  let score = 0;
+
+  // Reward filling underrepresented roles
+  const threatRatio  = comp.threats / total;
+  const removalRatio = comp.removal / total;
+  const drawRatio    = comp.cardDraw / total;
+  const rampRatio    = comp.ramp / total;
+
+  if (roles.includes("Threat") || roles.includes("Finisher")) {
+    score += threatRatio < 0.25 ? 14 : threatRatio < 0.35 ? 8 : 4;
+  }
+  if (roles.includes("Removal")) {
+    score += removalRatio < 0.10 ? 14 : removalRatio < 0.18 ? 8 : 4;
+  }
+  if (roles.includes("CardDraw")) {
+    score += drawRatio < 0.08 ? 12 : drawRatio < 0.14 ? 7 : 3;
+  }
+  if (roles.includes("Ramp")) {
+    score += rampRatio < 0.06 ? 10 : rampRatio < 0.12 ? 5 : 2;
+  }
+  if (roles.includes("Counterspell")) {
+    score += comp.counterspells < 4 ? 8 : 3;
+  }
+  if (roles.includes("BoardWipe")) {
+    score += comp.boardWipes < 2 ? 8 : 3;
   }
 
-  // Game changer bonus
-  if (card.gameChanger === 1) {
-    powerScore += 3;
-    breakdown.push("Game Changer designation → +3");
-  }
-
-  // Rarity baseline
-  const rarityBonus: Record<string, number> = {
-    mythic: 4, rare: 3, uncommon: 2, common: 1
-  };
-  const rb = rarityBonus[card.rarity ?? ""] ?? 0;
-  powerScore += rb;
-  if (rb > 0) breakdown.push(`${card.rarity} rarity → +${rb}`);
-
-  const clampedPower = Math.min(Math.round(powerScore * 10) / 10, 10);
-  const normalizedSynergy = Math.min((rawSynergyScore / 20) * 10, 10);
-  const cardScore = Math.round((clampedPower * 0.5 + normalizedSynergy * 0.5) * 10) / 10;
-
-  return {
-    powerScore: clampedPower,
-    synergyScore: Math.round(normalizedSynergy * 10) / 10,
-    cardScore,
-    breakdown
-  };
+  return Math.min(30, score);
 }

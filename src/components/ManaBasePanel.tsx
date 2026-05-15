@@ -1,133 +1,215 @@
-import { useEffect } from "react";
-import { useDeckStore } from "../store/deckStore";
-import { useManaBaseStore } from "../lib/manaBaseStore";
-import { ManaCurveChart } from "./ManaCurveChart";
-
-const COLOR_SYMBOLS: Record<string, string> = {
-  W: "☀️", U: "💧", B: "💀", R: "🔥", G: "🌿"
-};
+import { useMemo } from "react";
+import { useLiveQuery } from "dexie-react-hooks";
+import { db } from "../lib/db";
+import {
+  recommendLandCount,
+  recommendColorSources,
+  recommendDualLands,
+  buildManaCurve,
+  computeCastabilityWarnings,
+} from "../lib/manaBase";
+import { useDeckStore } from "../lib/deckStore";
+import type { DeckEntry } from "../lib/legality";
 
 const COLOR_LABELS: Record<string, string> = {
-  W: "White", U: "Blue", B: "Black", R: "Red", G: "Green"
+  W: "White", U: "Blue", B: "Black", R: "Red", G: "Green",
+};
+const COLOR_BG: Record<string, string> = {
+  W: "bg-yellow-100 text-yellow-900",
+  U: "bg-blue-100 text-blue-900",
+  B: "bg-zinc-800 text-zinc-100",
+  R: "bg-red-100 text-red-900",
+  G: "bg-green-100 text-green-900",
 };
 
 export function ManaBasePanel() {
-  const { entries } = useDeckStore();
-  const { analysis, loading, compute } = useManaBaseStore();
+  const entries = useDeckStore(s => s.entries) as DeckEntry[];
+  const allCards = useLiveQuery(() => db.cards.toArray(), []) ?? [];
 
-  useEffect(() => {
-    if (entries.length > 0) {
-      compute(entries);
-    }
-  }, [entries, compute]);
+  const mainboard = useMemo(
+    () => entries.filter(e => e.zone === "main"),
+    [entries]
+  );
 
-  if (loading || !analysis) {
+  const landRec = useMemo(() => recommendLandCount(mainboard), [mainboard]);
+
+  const activeColors = useMemo(() => {
+    const colorSources = recommendColorSources(mainboard, landRec.recommended);
+    return colorSources.map(c => c.color);
+  }, [mainboard, landRec.recommended]);
+
+  const colorSources = useMemo(
+    () => recommendColorSources(mainboard, landRec.recommended),
+    [mainboard, landRec.recommended]
+  );
+
+  const duals = useMemo(
+    () => recommendDualLands(allCards, activeColors, landRec.recommended),
+    [allCards, activeColors, landRec.recommended]
+  );
+
+  const curve = useMemo(() => buildManaCurve(mainboard), [mainboard]);
+  const maxCurve = Math.max(...curve.map(s => s.total), 1);
+
+  const deckSize = mainboard.reduce((s, e) => s + e.quantity, 0);
+  const castabilityWarnings = useMemo(
+    () => computeCastabilityWarnings(mainboard, deckSize),
+    [mainboard, deckSize]
+  );
+
+  const currentLands = mainboard
+    .filter(e => e.card.typeLine.includes("Land"))
+    .reduce((s, e) => s + e.quantity, 0);
+
+  if (mainboard.length === 0) {
     return (
-      <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-4 text-sm text-zinc-400">
-        {loading ? "Analyzing mana base..." : "Add cards to see mana base analysis."}
+      <div className="flex flex-col items-center justify-center py-16 text-zinc-500 text-sm">
+        <p>Add cards to see mana base analysis.</p>
       </div>
     );
   }
 
-  const { landRec, colorSources, dualSuggestions, curve, avgMV, castabilityWarnings, archetypeProfile } = analysis;
-
   return (
-    <div className="flex flex-col gap-4 rounded-xl border border-zinc-800 bg-zinc-950 p-4 text-sm text-zinc-100">
+    <div className="space-y-6 text-sm">
 
-      {/* Land count recommendation */}
-      <div>
+      {/* Land count */}
+      <section>
         <h3 className="font-semibold text-zinc-200 mb-2">Land Count</h3>
-        <div className="flex items-baseline gap-2">
-          <span className="text-2xl font-bold font-mono text-teal-400">{landRec.recommended}</span>
-          <span className="text-zinc-400">recommended ({landRec.rangeMin}–{landRec.rangeMax} range)</span>
+        <div className="flex items-center gap-4">
+          <div className="text-3xl font-bold text-teal-400">{currentLands}</div>
+          <div className="text-zinc-400">
+            <span className="text-zinc-200">Recommended: {landRec.recommended}</span>
+            <span className="ml-2 text-zinc-500">(range {landRec.rangeMin}–{landRec.rangeMax})</span>
+          </div>
         </div>
-        <div className="text-xs text-zinc-500 mt-1">Avg MV: {landRec.avgManaValue}</div>
+        <p className="text-zinc-500 mt-1">Avg MV: {landRec.avgManaValue.toFixed(2)}</p>
+        {currentLands !== landRec.recommended && (
+          <p className={`mt-1 font-medium ${
+            currentLands < landRec.rangeMin ? "text-red-400" :
+            currentLands > landRec.rangeMax ? "text-amber-400" : "text-teal-400"
+          }`}>
+            {currentLands < landRec.rangeMin
+              ? `⚠ ${landRec.recommended - currentLands} lands short`
+              : currentLands > landRec.rangeMax
+              ? `Consider cutting ${currentLands - landRec.recommended} land${currentLands - landRec.recommended > 1 ? "s" : ""}`
+              : "✓ In range"}
+          </p>
+        )}
         {landRec.adjustments.length > 0 && (
-          <ul className="mt-2 flex flex-col gap-0.5">
+          <ul className="mt-2 space-y-0.5 text-zinc-500">
             {landRec.adjustments.map((adj, i) => (
-              <li key={i} className="text-xs text-zinc-400">{adj}</li>
+              <li key={i}>{adj}</li>
             ))}
           </ul>
         )}
-      </div>
+      </section>
 
-      {/* Color distribution */}
+      {/* Color sources */}
       {colorSources.length > 0 && (
-        <div>
+        <section>
           <h3 className="font-semibold text-zinc-200 mb-2">Color Sources</h3>
-          <div className="flex flex-col gap-1">
+          <div className="space-y-2">
             {colorSources.map(cs => (
-              <div key={cs.color} className="flex items-center gap-2">
-                <span className="w-5 text-base">{COLOR_SYMBOLS[cs.color]}</span>
-                <span className="w-16 text-zinc-300">{COLOR_LABELS[cs.color]}</span>
+              <div key={cs.color} className="flex items-center gap-3">
+                <span className={`rounded px-1.5 py-0.5 text-xs font-bold ${
+                  COLOR_BG[cs.color] ?? "bg-zinc-700 text-zinc-100"
+                }`}>
+                  {cs.color}
+                </span>
+                <span className="text-zinc-300 w-16">{COLOR_LABELS[cs.color]}</span>
                 <div className="flex-1 h-2 bg-zinc-800 rounded-full overflow-hidden">
                   <div
-                    className="h-full rounded-full bg-teal-500"
-                    style={{ width: `${Math.min(cs.ratio * 100 * 2, 100)}%` }}
+                    className="h-full bg-teal-500 rounded-full transition-all"
+                    style={{ width: `${Math.round(cs.ratio * 100)}%` }}
                   />
                 </div>
-                <span className={`font-mono text-xs w-16 text-right ${
-                  cs.criticallyUndersourced ? "text-red-400" : "text-zinc-300"
-                }`}>
+                <span className="text-zinc-400 w-28 text-right">
                   {cs.recommendedSources} sources
+                  {cs.criticallyUndersourced && (
+                    <span className="ml-1 text-red-400">⚠</span>
+                  )}
                 </span>
-                {cs.criticallyUndersourced && (
-                  <span className="text-xs text-red-400">⚠ critical</span>
-                )}
               </div>
             ))}
           </div>
-        </div>
+        </section>
       )}
 
-      {/* Mana curve chart */}
-      <div className="border-t border-zinc-800 pt-4">
-        <ManaCurveChart curve={curve} archetypeProfile={archetypeProfile} avgMV={avgMV} />
-      </div>
+      {/* Mana curve */}
+      <section>
+        <h3 className="font-semibold text-zinc-200 mb-2">Mana Curve</h3>
+        <div className="flex items-end gap-1.5 h-24">
+          {curve.map(slot => (
+            <div key={slot.mv} className="flex flex-col items-center flex-1">
+              <div
+                className="w-full bg-teal-600 rounded-t transition-all"
+                style={{ height: `${Math.round((slot.total / maxCurve) * 88)}px` }}
+                title={`${slot.total} card${slot.total !== 1 ? "s" : ""} at MV ${slot.mv}`}
+              />
+              <span className="text-zinc-500 text-xs mt-1">{slot.mv === 7 ? "7+" : slot.mv}</span>
+            </div>
+          ))}
+        </div>
+        <div className="flex gap-1.5 mt-1">
+          {curve.map(slot => (
+            <div key={slot.mv} className="flex-1 text-center text-zinc-400 text-xs">
+              {slot.total || ""}
+            </div>
+          ))}
+        </div>
+      </section>
 
-      {/* Dual land recommendations */}
-      {dualSuggestions.length > 0 && (
-        <div className="border-t border-zinc-800 pt-4">
+      {/* Dual land suggestions */}
+      {duals.length > 0 && (
+        <section>
           <h3 className="font-semibold text-zinc-200 mb-2">Suggested Dual Lands</h3>
-          <div className="flex flex-col gap-1">
-            {dualSuggestions.slice(0, 8).map(ds => (
-              <div key={ds.card.id} className="flex items-center gap-2">
-                <span className={`text-xs px-1.5 py-0.5 rounded font-mono ${
-                  ds.tier === 1 ? "bg-emerald-900/50 text-emerald-400" :
-                  ds.tier === 2 ? "bg-yellow-900/50 text-yellow-400" :
-                  "bg-red-900/50 text-red-400"
-                }`}>T{ds.tier}</span>
-                <span className="text-zinc-200 flex-1 truncate">{ds.card.name}</span>
-                <span className="text-zinc-500 text-xs font-mono">×{ds.quantity}</span>
-                {ds.card.priceUsd != null && (
-                  <span className="text-zinc-500 text-xs">${ds.card.priceUsd.toFixed(2)}</span>
-                )}
+          <div className="space-y-1.5">
+            {duals.slice(0, 8).map(d => (
+              <div
+                key={d.card.id}
+                className="flex items-center justify-between rounded-md bg-zinc-800 px-3 py-1.5"
+              >
+                <div>
+                  <span className="text-zinc-100">{d.card.name}</span>
+                  <span className={`ml-2 text-xs ${
+                    d.tier === 1 ? "text-teal-400" :
+                    d.tier === 2 ? "text-amber-400" : "text-zinc-500"
+                  }`}>
+                    T{d.tier}
+                  </span>
+                </div>
+                <span className="text-zinc-500 text-xs">{d.tierLabel}</span>
               </div>
             ))}
           </div>
-        </div>
+        </section>
       )}
 
       {/* Castability warnings */}
       {castabilityWarnings.length > 0 && (
-        <div className="border-t border-zinc-800 pt-4">
-          <h3 className="font-semibold text-yellow-400 mb-2">⚡ Castability Warnings</h3>
-          <div className="flex flex-col gap-1">
+        <section>
+          <h3 className="font-semibold text-zinc-200 mb-2">Castability Warnings</h3>
+          <div className="space-y-1.5">
             {castabilityWarnings.map(w => (
-              <div key={w.cardName} className="flex items-start gap-2 text-xs">
-                <span className="text-yellow-500 mt-0.5">⚠</span>
+              <div
+                key={w.cardName}
+                className="flex items-center justify-between rounded-md bg-red-950/40 border border-red-900/40 px-3 py-1.5"
+              >
                 <div>
                   <span className="text-zinc-200">{w.cardName}</span>
-                  <span className="text-zinc-500"> (CMC {w.cmc}) — only </span>
-                  <span className="text-yellow-400 font-mono">{Math.round(w.probByNaturalTurn * 100)}%</span>
-                  <span className="text-zinc-500"> chance of casting by T{w.naturalTurn}. Consider more ramp or lowering curve.</span>
+                  <span className="ml-2 text-zinc-500 text-xs">MV {w.cmc} · {w.copiesInDeck}×</span>
                 </div>
+                <span className="text-red-400 text-xs">
+                  {Math.round(w.probByNaturalTurn * 100)}% by T{w.naturalTurn}
+                </span>
               </div>
             ))}
           </div>
-        </div>
+          <p className="text-zinc-600 text-xs mt-2">
+            Cards below 60% probability of appearing by their natural turn.
+          </p>
+        </section>
       )}
-
     </div>
   );
 }
