@@ -4,7 +4,7 @@ import { compareDecks, parsePlainDecklist } from "../lib/deckCompare";
 import { db } from "../lib/db";
 import type { SimpleEntry, DeckCompareResult } from "../lib/deckCompare";
 
-// ─── helpers ────────────────────────────────────────────────────────────────
+// ── helpers ──────────────────────────────────────────────────────────────
 
 function deckEntriesToSimple(
   entries: ReturnType<typeof useDeckStore>["entries"]
@@ -17,23 +17,34 @@ function deckEntriesToSimple(
       cmc:      e.card.cmc,
       typeLine: e.card.typeLine,
       setCode:  e.card.setCode?.toLowerCase(),
+      enriched: true, // Deck A always comes from the local DB
     }));
 }
 
 /**
- * Look up each entry by name in Dexie and fill in cmc / typeLine.
- * Unrecognised cards keep whatever values parsePlainDecklist gave them.
+ * Look up each Deck B entry by name in Dexie and fill in cmc / typeLine.
+ * Marks enriched:true for hits, leaves enriched:false for misses so
+ * compareDecks can surface the unenrichedB list.
  */
 async function enrichFromDB(entries: SimpleEntry[]): Promise<SimpleEntry[]> {
   if (entries.length === 0) return entries;
-  // Dexie .where('name').anyOf(...) returns all matching records
-  const names = entries.map(e => e.name);
-  const records = await db.cards.where("name").anyOf(names).toArray();
-  const byName = new Map(records.map(r => [r.name.toLowerCase(), r]));
+  const names   = entries.map(e => e.name);
+  const records  = await db.cards.where("name").anyOf(names).toArray();
+  // Keep only one record per name (any printing gives correct cmc/typeLine)
+  const byName   = new Map<string, typeof records[number]>();
+  for (const r of records) {
+    if (!byName.has(r.name.toLowerCase())) byName.set(r.name.toLowerCase(), r);
+  }
   return entries.map(e => {
     const rec = byName.get(e.name.toLowerCase());
-    if (!rec) return e;
-    return { ...e, cmc: rec.cmc, typeLine: rec.typeLine, setCode: rec.setCode?.toLowerCase() };
+    if (!rec) return e; // enriched stays false — card not in local DB
+    return {
+      ...e,
+      cmc:      rec.cmc,
+      typeLine: rec.typeLine,
+      setCode:  rec.setCode?.toLowerCase(),
+      enriched: true,
+    };
   });
 }
 
@@ -61,23 +72,21 @@ function BarRow({ label, valA, valB, max }: { label: string; valA: number; valB:
   );
 }
 
-// ─── main component ──────────────────────────────────────────────────────────
+// ── main component ───────────────────────────────────────────────────────────
 
 export function DeckComparePanel() {
   const entries    = useDeckStore(s => s.entries);
   const deckNameA  = useDeckStore(s => s.deckName);
 
-  const [rawB, setRawB]       = useState("");
-  const [nameB, setNameB]     = useState("Deck B");
+  const [rawB, setRawB]           = useState("");
+  const [nameB, setNameB]         = useState("Deck B");
   const [activeTab, setActiveTab] = useState<"overlap" | "curve" | "types">("overlap");
 
-  // Parsed + DB-enriched Deck B
   const [deckBEnriched, setDeckBEnriched] = useState<SimpleEntry[]>([]);
   const [enriching, setEnriching]         = useState(false);
 
   const deckA: SimpleEntry[] = useMemo(() => deckEntriesToSimple(entries), [entries]);
 
-  // Re-parse + enrich whenever rawB changes
   useEffect(() => {
     const parsed = parsePlainDecklist(rawB);
     if (parsed.length === 0) { setDeckBEnriched([]); return; }
@@ -139,10 +148,41 @@ export function DeckComparePanel() {
         />
         {parsedCount > 0 && (
           <p className="text-xs text-zinc-500">
-            {parsedCount} cards parsed{enriching ? " — looking up…" : " — enriched from DB"}
+            {parsedCount} cards parsed
+            {enriching
+              ? " — looking up…"
+              : result && result.unenrichedB.length > 0
+                ? ` — ${result.unenrichedB.length} not in local DB`
+                : " — enriched from DB"}
           </p>
         )}
       </div>
+
+      {/* Unenriched warning banner */}
+      {result && result.unenrichedB.length > 0 && (
+        <div className="flex gap-2 rounded-lg border border-amber-800 bg-amber-950/40 px-3 py-2">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+            className="h-4 w-4 shrink-0 mt-0.5 text-amber-400">
+            <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+            <line x1="12" y1="9" x2="12" y2="13" />
+            <line x1="12" y1="17" x2="12.01" y2="17" />
+          </svg>
+          <div className="min-w-0">
+            <p className="text-xs font-medium text-amber-300">
+              {result.unenrichedB.length} card{result.unenrichedB.length !== 1 ? "s" : ""} not found in your local database
+            </p>
+            <p className="text-xs text-amber-500 mt-0.5">
+              Mana curve and card type charts may be inaccurate for:
+            </p>
+            <p className="text-xs text-amber-400/80 mt-0.5 break-words">
+              {result.unenrichedB.join(" · ")}
+            </p>
+            <p className="text-xs text-amber-600 mt-1">
+              Re-import your card database to include these cards.
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* No data state */}
       {!result && (
@@ -163,7 +203,6 @@ export function DeckComparePanel() {
       {/* Results */}
       {result && (
         <>
-          {/* Summary stats */}
           <div className="grid grid-cols-3 gap-2">
             <div className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-center">
               <p className="text-lg font-semibold text-teal-400">{result.overlapPct}%</p>
@@ -179,7 +218,6 @@ export function DeckComparePanel() {
             </div>
           </div>
 
-          {/* Tabs */}
           <div className="flex gap-1">
             {(["overlap", "curve", "types"] as const).map(tab => (
               <button
@@ -196,7 +234,6 @@ export function DeckComparePanel() {
             ))}
           </div>
 
-          {/* Tab content */}
           {activeTab === "overlap" && (
             <div className="space-y-3">
               {result.shared.length > 0 && (
@@ -250,38 +287,34 @@ export function DeckComparePanel() {
           {activeTab === "curve" && (
             <div className="space-y-2">
               <div className="grid grid-cols-[1fr_6rem_6rem] gap-2 text-xs font-medium text-zinc-500 uppercase tracking-wider">
-                <span>CMC</span>
-                <span>A</span>
-                <span>B</span>
+                <span>CMC</span><span>A</span><span>B</span>
               </div>
               {result.curve.map(c => (
-                <BarRow
-                  key={c.cmc}
-                  label={c.cmc === 6 ? "6+" : String(c.cmc)}
-                  valA={c.countA}
-                  valB={c.countB}
-                  max={curvMax}
-                />
+                <BarRow key={c.cmc} label={c.cmc === 6 ? "6+" : String(c.cmc)}
+                  valA={c.countA} valB={c.countB} max={curvMax} />
               ))}
+              {result.unenrichedB.length > 0 && (
+                <p className="text-xs text-amber-600 mt-2">
+                  ⚠️ Curve data incomplete — {result.unenrichedB.length} Deck B card{result.unenrichedB.length !== 1 ? "s" : ""} missing from DB
+                </p>
+              )}
             </div>
           )}
 
           {activeTab === "types" && (
             <div className="space-y-2">
               <div className="grid grid-cols-[1fr_6rem_6rem] gap-2 text-xs font-medium text-zinc-500 uppercase tracking-wider">
-                <span>Type</span>
-                <span>A</span>
-                <span>B</span>
+                <span>Type</span><span>A</span><span>B</span>
               </div>
               {result.types.map(t => (
-                <BarRow
-                  key={t.type}
-                  label={t.type}
-                  valA={t.countA}
-                  valB={t.countB}
-                  max={typeMax}
-                />
+                <BarRow key={t.type} label={t.type}
+                  valA={t.countA} valB={t.countB} max={typeMax} />
               ))}
+              {result.unenrichedB.length > 0 && (
+                <p className="text-xs text-amber-600 mt-2">
+                  ⚠️ Type data incomplete — {result.unenrichedB.length} Deck B card{result.unenrichedB.length !== 1 ? "s" : ""} bucketed as “Other / CMC 0”
+                </p>
+              )}
             </div>
           )}
         </>

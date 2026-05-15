@@ -14,8 +14,9 @@ const RESULT_LABELS: Record<MatchResult["result"], string> = {
 };
 
 export function MatchTrackerPanel() {
-  const activeDeckId = useDeckStore(s => s.activeDeckId);
+  const activeDeckId    = useDeckStore(s => s.activeDeckId);
   const saveCurrentDeck = useDeckStore(s => s.saveCurrentDeck);
+  const loadSavedDecks  = useDeckStore(s => s.loadSavedDecks);
 
   const [matches, setMatches]       = useState<MatchResult[]>([]);
   const [opponent, setOpponent]     = useState("");
@@ -35,6 +36,16 @@ export function MatchTrackerPanel() {
   const logMatch = async (result: MatchResult["result"]) => {
     if (submitting) return;
     setSubmitting(true);
+
+    // Ensure deck exists in savedDecks before updating W/L/D.
+    // If it was never saved, auto-save it now so the win-rate badge
+    // in DeckListPanel is always kept in sync.
+    let saved = await db.savedDecks.get(activeDeckId);
+    if (!saved) {
+      await saveCurrentDeck();
+      saved = await db.savedDecks.get(activeDeckId);
+    }
+
     await db.matchResults.add({
       deckId:   activeDeckId,
       opponent: opponent.trim() || "Unknown",
@@ -42,17 +53,17 @@ export function MatchTrackerPanel() {
       notes:    notes.trim(),
       playedAt: Date.now(),
     });
-    // Update W/L/D on the saved deck record
-    const saved = await db.savedDecks.get(activeDeckId);
+
     if (saved) {
       await db.savedDecks.update(activeDeckId, {
         wins:   saved.wins   + (result === "win"  ? 1 : 0),
         losses: saved.losses + (result === "loss" ? 1 : 0),
         draws:  saved.draws  + (result === "draw" ? 1 : 0),
       });
-      // Refresh savedDecks in store
-      await saveCurrentDeck();
+      // Refresh the savedDecks list in the store so DeckListPanel badges update
+      await loadSavedDecks();
     }
+
     setOpponent("");
     setNotes("");
     setSubmitting(false);
@@ -75,10 +86,10 @@ export function MatchTrackerPanel() {
       {/* Record summary */}
       <div className="grid grid-cols-4 gap-2 text-center">
         {([
-          { label: "W",   value: wins,   cls: "text-teal-400" },
-          { label: "L",   value: losses, cls: "text-red-400" },
-          { label: "D",   value: draws,  cls: "text-zinc-400" },
-          { label: "WR",  value: wr !== null ? `${wr}%` : "—", cls: "text-zinc-200" },
+          { label: "W",  value: wins,   cls: "text-teal-400" },
+          { label: "L",  value: losses, cls: "text-red-400" },
+          { label: "D",  value: draws,  cls: "text-zinc-400" },
+          { label: "WR", value: wr !== null ? `${wr}%` : "—", cls: "text-zinc-200" },
         ] as const).map(({ label, value, cls }) => (
           <div key={label} className="rounded-lg border border-zinc-800 bg-zinc-900 py-2">
             <p className={`text-base font-semibold ${cls}`}>{value}</p>

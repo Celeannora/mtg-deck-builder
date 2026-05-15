@@ -13,6 +13,8 @@ export interface SimpleEntry {
   typeLine?: string;
   /** Lower-cased set code, used for rotation exposure */
   setCode?: string;
+  /** False until enrichFromDB has resolved this entry against the local card DB */
+  enriched?: boolean;
 }
 
 export interface OverlapCard {
@@ -51,6 +53,12 @@ export interface DeckCompareResult {
   overlapCount: number;
   /** Overlap as % of the smaller deck */
   overlapPct: number;
+  /**
+   * Number of distinct Deck B card names that were NOT found in the local
+   * IndexedDB (cmc / typeLine fell back to 0 / ""). The UI should warn the
+   * user that curve and type charts may be inaccurate for these cards.
+   */
+  unenrichedB: string[];
 }
 
 const BROAD_TYPES = ["Creature", "Instant", "Sorcery", "Enchantment", "Artifact", "Planeswalker", "Battle", "Land"];
@@ -94,13 +102,18 @@ export function compareDecks(a: SimpleEntry[], b: SimpleEntry[]): DeckCompareRes
   const overlapCount = shared.reduce((s, c) => s + Math.min(c.quantityA, c.quantityB), 0);
   const overlapPct = Math.round((overlapCount / Math.min(totalA || 1, totalB || 1)) * 100);
 
+  // Collect unenriched Deck B card names
+  const unenrichedB: string[] = b
+    .filter(e => e.enriched === false)
+    .map(e => e.name);
+
   // Curve (non-land spells)
   const curveBuckets = new Map<number, { a: number; b: number }>();
   for (let i = 0; i <= 6; i++) curveBuckets.set(i, { a: 0, b: 0 });
   for (const e of a) {
     if (e.typeLine?.includes("Land")) continue;
-    const b = bucketCmc(e.cmc ?? 0);
-    curveBuckets.get(b)!.a += e.quantity;
+    const bk = bucketCmc(e.cmc ?? 0);
+    curveBuckets.get(bk)!.a += e.quantity;
   }
   for (const e of b) {
     if (e.typeLine?.includes("Land")) continue;
@@ -128,7 +141,7 @@ export function compareDecks(a: SimpleEntry[], b: SimpleEntry[]): DeckCompareRes
     .filter(([, counts]) => counts.a > 0 || counts.b > 0)
     .map(([type, counts]) => ({ type, countA: counts.a, countB: counts.b }));
 
-  return { shared, onlyInA, onlyInB, curve, types, totalA, totalB, overlapCount, overlapPct };
+  return { shared, onlyInA, onlyInB, curve, types, totalA, totalB, overlapCount, overlapPct, unenrichedB };
 }
 
 /**
@@ -136,6 +149,9 @@ export function compareDecks(a: SimpleEntry[], b: SimpleEntry[]): DeckCompareRes
  *   4 Lightning Bolt
  *   2 Island
  *   // Sideboard (ignored)
+ *
+ * Entries are tagged enriched:false so enrichFromDB can track which
+ * cards were actually found in the local IndexedDB.
  */
 export function parsePlainDecklist(text: string): SimpleEntry[] {
   const entries: SimpleEntry[] = [];
@@ -144,7 +160,7 @@ export function parsePlainDecklist(text: string): SimpleEntry[] {
     if (!line || line.startsWith("//") || line.startsWith("#")) continue;
     const match = line.match(/^(\d+)x?\s+(.+)$/);
     if (!match) continue;
-    entries.push({ name: match[2].trim(), quantity: parseInt(match[1], 10) });
+    entries.push({ name: match[2].trim(), quantity: parseInt(match[1], 10), enriched: false });
   }
   return entries;
 }
