@@ -8,6 +8,7 @@ import { Header } from "./components/Header";
 import { DatabaseStatusBar } from "./components/DatabaseStatusBar";
 import { DeckImportPanel } from "./components/DeckImportPanel";
 import { DeckComparePanel } from "./components/DeckComparePanel";
+import { DeckListPanel } from "./components/DeckListPanel";
 import { useDBStatus } from "./hooks/useDBStatus";
 import { useDeckStore } from "./store/deckStore";
 import { decodeShareableLink } from "./lib/deckExporter";
@@ -18,11 +19,12 @@ export type AppView = "builder" | "compare" | "import";
 export type ImportMode = "db" | "deck";
 
 export default function App() {
-  const [view, setView]             = useState<AppView>("builder");
-  const [importMode, setImportMode] = useState<ImportMode>("db");
-  const [detailCard, setDetailCard] = useState<CardRecord | null>(null);
+  const [view, setView]               = useState<AppView>("builder");
+  const [importMode, setImportMode]   = useState<ImportMode>("db");
+  const [detailCard, setDetailCard]   = useState<CardRecord | null>(null);
   const [swUpdateReady, setSwUpdateReady] = useState(false);
   const [mobilePanelIdx, setMobilePanelIdx] = useState(0);
+  const [deckListOpen, setDeckListOpen]     = useState(false);
 
   const { isReady, refresh } = useDBStatus();
   const activeDeckId         = useDeckStore(s => s.activeDeckId);
@@ -48,7 +50,6 @@ export default function App() {
     setView("builder");
   };
 
-  // Mobile panel labels for the 3-column builder layout
   const mobilePanels = ["Search", "Deck", "Analysis"];
 
   return (
@@ -59,10 +60,7 @@ export default function App() {
       {swUpdateReady && (
         <div className="shrink-0 flex items-center justify-between gap-3 bg-teal-900/60 border-b border-teal-700 px-4 py-2 text-sm">
           <span className="text-teal-200">A new version is available.</span>
-          <button
-            onClick={() => window.location.reload()}
-            className="rounded-md bg-teal-600 px-3 py-1 text-xs font-medium hover:bg-teal-500"
-          >
+          <button onClick={() => window.location.reload()} className="rounded-md bg-teal-600 px-3 py-1 text-xs font-medium hover:bg-teal-500">
             Reload
           </button>
         </div>
@@ -73,24 +71,18 @@ export default function App() {
           <div className="w-full max-w-2xl space-y-4">
             <div className="flex gap-2">
               {(["db", "deck"] as ImportMode[]).map((m) => (
-                <button
-                  key={m}
-                  onClick={() => setImportMode(m)}
+                <button key={m} onClick={() => setImportMode(m)}
                   className={`rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
-                    importMode === m
-                      ? "bg-teal-600 text-white"
-                      : "bg-zinc-800 text-zinc-300 hover:bg-zinc-700"
+                    importMode === m ? "bg-teal-600 text-white" : "bg-zinc-800 text-zinc-300 hover:bg-zinc-700"
                   }`}
                 >
                   {m === "db" ? "Load Card Database" : "Import Deck"}
                 </button>
               ))}
             </div>
-            {importMode === "db" ? (
-              <BulkImporter onImportDone={() => { refresh(); setView("builder"); }} />
-            ) : (
-              <DeckImportPanel onImported={handleDeckImported} />
-            )}
+            {importMode === "db"
+              ? <BulkImporter onImportDone={() => { refresh(); setView("builder"); }} />
+              : <DeckImportPanel onImported={handleDeckImported} />}
           </div>
         </main>
 
@@ -114,8 +106,17 @@ export default function App() {
 
       ) : (
         <>
-          {/* ── Mobile panel switcher tabs (hidden on md+) ── */}
+          {/* Mobile panel switcher */}
           <div className="flex shrink-0 border-b border-zinc-800 md:hidden">
+            <button
+              onClick={() => setDeckListOpen(o => !o)}
+              className="px-3 py-2 text-xs text-zinc-500 hover:text-zinc-200 border-r border-zinc-800"
+              aria-label="My decks"
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-4 w-4">
+                <path d="M19 11H5m14 0a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-6a2 2 0 0 1 2-2m14 0V9a2 2 0 0 0-2-2M5 11V9a2 2 0 0 1 2-2m0 0V5a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v2M7 7h10" />
+              </svg>
+            </button>
             {mobilePanels.map((label, i) => (
               <button
                 key={label}
@@ -131,14 +132,33 @@ export default function App() {
             ))}
           </div>
 
-          {/* ── Main builder layout ── */}
-          <main className="flex-1 overflow-hidden">
-            {/* Desktop: fixed 3-column grid */}
+          <main className="flex flex-1 overflow-hidden">
+            {/* Deck list drawer — slides in over the left edge */}
+            {deckListOpen && (
+              <DeckListPanel onClose={() => setDeckListOpen(false)} />
+            )}
+
+            {/* Desktop 3-column */}
             <div
-              className="hidden md:grid h-full"
+              className={`hidden md:grid h-full flex-1 ${ deckListOpen ? "" : "w-full" }`}
               style={{ gridTemplateColumns: "35% 40% 25%" }}
             >
               <section className="flex flex-col overflow-hidden border-r border-zinc-800">
+                {/* Deck list toggle button in desktop search column header */}
+                <div className="flex shrink-0 items-center gap-2 border-b border-zinc-800 px-3 py-2">
+                  <button
+                    onClick={() => setDeckListOpen(o => !o)}
+                    className={`flex items-center gap-1.5 rounded px-2 py-1 text-xs transition-colors ${
+                      deckListOpen ? "bg-zinc-700 text-zinc-100" : "text-zinc-500 hover:text-zinc-200"
+                    }`}
+                    aria-label="Toggle deck list"
+                  >
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-3.5 w-3.5">
+                      <path d="M19 11H5m14 0a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-6a2 2 0 0 1 2-2m14 0V9a2 2 0 0 0-2-2M5 11V9a2 2 0 0 1 2-2m0 0V5a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v2M7 7h10" />
+                    </svg>
+                    My Decks
+                  </button>
+                </div>
                 <CardSearchPanel onCardClick={setDetailCard} />
               </section>
               <section className="flex flex-col overflow-hidden border-r border-zinc-800">
@@ -149,8 +169,8 @@ export default function App() {
               </section>
             </div>
 
-            {/* Mobile: single-panel view controlled by tab */}
-            <div className="flex flex-col h-full overflow-hidden md:hidden">
+            {/* Mobile single-panel */}
+            <div className="flex flex-col h-full overflow-hidden md:hidden flex-1">
               {mobilePanelIdx === 0 && <CardSearchPanel onCardClick={setDetailCard} />}
               {mobilePanelIdx === 1 && <DeckPanel onCardClick={setDetailCard} />}
               {mobilePanelIdx === 2 && <RightPanel activeDeckId={activeDeckId} />}

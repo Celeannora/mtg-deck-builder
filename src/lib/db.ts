@@ -6,9 +6,31 @@ export interface ImportMeta {
   value: string;
 }
 
+export interface SavedDeck {
+  id: string;          // makeId() value
+  name: string;
+  updatedAt: number;   // Date.now()
+  mainboard: Record<string, number>; // oracleId -> quantity
+  sideboard: Record<string, number>;
+  wins: number;
+  losses: number;
+  draws: number;
+}
+
+export interface MatchResult {
+  id?: number;         // auto-increment
+  deckId: string;
+  opponent: string;    // free-text opponent deck name
+  result: "win" | "loss" | "draw";
+  notes: string;
+  playedAt: number;    // Date.now()
+}
+
 export class MTGDeckBuilderDB extends Dexie {
-  cards!: Table<CardRecord, string>;
-  meta!: Table<ImportMeta, string>;
+  cards!:        Table<CardRecord,   string>;
+  meta!:         Table<ImportMeta,   string>;
+  savedDecks!:   Table<SavedDeck,    string>;
+  matchResults!: Table<MatchResult,  number>;
 
   constructor() {
     super("mtgDeckBuilderDB");
@@ -32,7 +54,31 @@ export class MTGDeckBuilderDB extends Dexie {
         *colorIdentityJson,
         typeLine
       `,
-      meta: "key"
+      meta: "key",
+    });
+
+    this.version(2).stores({
+      cards: `
+        id,
+        oracleId,
+        name,
+        cmc,
+        legalityStandard,
+        legalityFuture,
+        bannedInStandard,
+        setCode,
+        setName,
+        rarity,
+        imageNormal,
+        importedAt,
+        *keywordsJson,
+        *colorsJson,
+        *colorIdentityJson,
+        typeLine
+      `,
+      meta:         "key",
+      savedDecks:   "id, updatedAt",
+      matchResults: "++id, deckId, playedAt",
     });
   }
 }
@@ -45,7 +91,7 @@ export async function replaceAllCards(cards: CardRecord[], importedAt: string) {
     await db.cards.bulkPut(cards);
     await db.meta.bulkPut([
       { key: "lastImportedAt", value: importedAt },
-      { key: "cardCount", value: String(cards.length) }
+      { key: "cardCount",      value: String(cards.length) },
     ]);
   });
 }

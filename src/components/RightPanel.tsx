@@ -13,13 +13,14 @@ import { MetagamePanel } from "./MetagamePanel";
 import { DeckExportPanel } from "./DeckExportPanel";
 import { AdvisorPanel } from "./AdvisorPanel";
 import { ConsistencyPanel } from "./ConsistencyPanel";
+import { MatchTrackerPanel } from "./MatchTrackerPanel";
 import { useDeckStore, useMainboardEntries, useSideboardEntries } from "../store/deckStore";
 import type { DeckSnapshot } from "../lib/deckHistory";
 
 type Tab =
   | "curve" | "mana" | "archetype" | "validate" | "gameplan"
   | "bo3" | "sideboard" | "collection" | "history" | "export" | "meta" | "advisor"
-  | "consistency";
+  | "consistency" | "matches";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "curve",       label: "Curve" },
@@ -32,6 +33,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: "sideboard",   label: "Side" },
   { id: "advisor",     label: "Advisor" },
   { id: "collection",  label: "Collect" },
+  { id: "matches",     label: "Matches" },
   { id: "history",     label: "History" },
   { id: "export",      label: "Export" },
   { id: "meta",        label: "Meta" },
@@ -44,9 +46,9 @@ interface Props {
 export function RightPanel({ activeDeckId }: Props) {
   const [tab, setTab] = useState<Tab>("curve");
 
-  const mainEntries = useMainboardEntries();
-  const sideEntries = useSideboardEntries();
-  const deckName    = useDeckStore(s => s.deckName);
+  const mainEntries      = useMainboardEntries();
+  const sideEntries      = useSideboardEntries();
+  const deckName         = useDeckStore(s => s.deckName);
   const loadFromSnapshot = useDeckStore(s => s.loadFromSnapshot);
 
   const mainCards = useMemo(() => mainEntries.map(e => e.card), [mainEntries]);
@@ -84,7 +86,6 @@ export function RightPanel({ activeDeckId }: Props) {
     <div className="flex flex-col h-full">
       <DeckStatsBar />
 
-      {/* Scrollable tab bar */}
       <div className="flex shrink-0 overflow-x-auto border-b border-zinc-800 scrollbar-none">
         {TABS.map((t) => (
           <button
@@ -109,11 +110,10 @@ export function RightPanel({ activeDeckId }: Props) {
         {tab === "validate"    && <ValidationPanel />}
         {tab === "gameplan"    && <GamePlanSummary />}
         {tab === "bo3"         && <Bo3Panel deckId={activeDeckId} />}
-        {tab === "sideboard"   && (
-          <SideboardPlanPanel mainboard={mainCards} sideboard={sideCards} />
-        )}
+        {tab === "sideboard"   && <SideboardPlanPanel mainboard={mainCards} sideboard={sideCards} />}
         {tab === "advisor"     && <AdvisorPanel />}
         {tab === "collection"  && <CollectionPanel deckCards={deckCards} />}
+        {tab === "matches"     && <MatchTrackerPanel />}
         {tab === "history"     && (
           <DeckHistoryPanel
             deckId={activeDeckId}
