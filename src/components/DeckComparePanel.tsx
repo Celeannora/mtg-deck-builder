@@ -1,6 +1,7 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useDeckStore } from "../store/deckStore";
 import { compareDecks, parsePlainDecklist } from "../lib/deckCompare";
+import { db } from "../lib/db";
 import type { SimpleEntry, DeckCompareResult } from "../lib/deckCompare";
 
 // ─── helpers ────────────────────────────────────────────────────────────────
@@ -17,6 +18,23 @@ function deckEntriesToSimple(
       typeLine: e.card.typeLine,
       setCode:  e.card.setCode?.toLowerCase(),
     }));
+}
+
+/**
+ * Look up each entry by name in Dexie and fill in cmc / typeLine.
+ * Unrecognised cards keep whatever values parsePlainDecklist gave them.
+ */
+async function enrichFromDB(entries: SimpleEntry[]): Promise<SimpleEntry[]> {
+  if (entries.length === 0) return entries;
+  // Dexie .where('name').anyOf(...) returns all matching records
+  const names = entries.map(e => e.name);
+  const records = await db.cards.where("name").anyOf(names).toArray();
+  const byName = new Map(records.map(r => [r.name.toLowerCase(), r]));
+  return entries.map(e => {
+    const rec = byName.get(e.name.toLowerCase());
+    if (!rec) return e;
+    return { ...e, cmc: rec.cmc, typeLine: rec.typeLine, setCode: rec.setCode?.toLowerCase() };
+  });
 }
 
 const BAR_COLORS = { a: "bg-teal-500", b: "bg-violet-500" };
@@ -43,26 +61,38 @@ function BarRow({ label, valA, valB, max }: { label: string; valA: number; valB:
   );
 }
 
-// ─── main component ─────────────────────────────────────────────────────────
+// ─── main component ──────────────────────────────────────────────────────────
 
 export function DeckComparePanel() {
-  const entries = useDeckStore(s => s.entries);
-  const deckNameA = useDeckStore(s => s.deckName);
-  const [rawB, setRawB] = useState("");
-  const [nameB, setNameB] = useState("Deck B");
+  const entries    = useDeckStore(s => s.entries);
+  const deckNameA  = useDeckStore(s => s.deckName);
+
+  const [rawB, setRawB]       = useState("");
+  const [nameB, setNameB]     = useState("Deck B");
   const [activeTab, setActiveTab] = useState<"overlap" | "curve" | "types">("overlap");
+
+  // Parsed + DB-enriched Deck B
+  const [deckBEnriched, setDeckBEnriched] = useState<SimpleEntry[]>([]);
+  const [enriching, setEnriching]         = useState(false);
 
   const deckA: SimpleEntry[] = useMemo(() => deckEntriesToSimple(entries), [entries]);
 
-  const deckB: SimpleEntry[] = useMemo(() => {
-    if (!rawB.trim()) return [];
-    return parsePlainDecklist(rawB);
+  // Re-parse + enrich whenever rawB changes
+  useEffect(() => {
+    const parsed = parsePlainDecklist(rawB);
+    if (parsed.length === 0) { setDeckBEnriched([]); return; }
+    let cancelled = false;
+    setEnriching(true);
+    enrichFromDB(parsed).then(enriched => {
+      if (!cancelled) { setDeckBEnriched(enriched); setEnriching(false); }
+    });
+    return () => { cancelled = true; };
   }, [rawB]);
 
   const result: DeckCompareResult | null = useMemo(() => {
-    if (deckA.length === 0 || deckB.length === 0) return null;
-    return compareDecks(deckA, deckB);
-  }, [deckA, deckB]);
+    if (deckA.length === 0 || deckBEnriched.length === 0) return null;
+    return compareDecks(deckA, deckBEnriched);
+  }, [deckA, deckBEnriched]);
 
   const curvMax = result
     ? Math.max(...result.curve.map(c => Math.max(c.countA, c.countB)), 1)
@@ -70,6 +100,8 @@ export function DeckComparePanel() {
   const typeMax = result
     ? Math.max(...result.types.map(t => Math.max(t.countA, t.countB)), 1)
     : 1;
+
+  const parsedCount = deckBEnriched.reduce((s, e) => s + e.quantity, 0);
 
   return (
     <div className="flex h-full flex-col gap-4 p-4 overflow-y-auto">
@@ -105,8 +137,10 @@ export function DeckComparePanel() {
           placeholder={`4 Lightning Bolt\n3 Mountain\n...`}
           className="w-full resize-none rounded border border-zinc-700 bg-zinc-950 px-2 py-1.5 font-mono text-xs text-zinc-200 focus:outline-none focus:border-teal-500"
         />
-        {deckB.length > 0 && (
-          <p className="text-xs text-zinc-500">{deckB.reduce((s, e) => s + e.quantity, 0)} cards parsed</p>
+        {parsedCount > 0 && (
+          <p className="text-xs text-zinc-500">
+            {parsedCount} cards parsed{enriching ? " — looking up…" : " — enriched from DB"}
+          </p>
         )}
       </div>
 
