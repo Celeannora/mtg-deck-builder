@@ -18,7 +18,7 @@ export function getPowerSignal(
   card: CardRecord,
   deckEntries: DeckEntry[]
 ): number {
-  if (deckEntries.length === 0) return 10; // neutral when no deck
+  if (deckEntries.length === 0) return 10;
 
   const comp = getRoleComposition(deckEntries);
   const total = Math.max(comp.total, 1);
@@ -26,7 +26,6 @@ export function getPowerSignal(
 
   let score = 0;
 
-  // Reward filling underrepresented roles
   const threatRatio  = comp.threats / total;
   const removalRatio = comp.removal / total;
   const drawRatio    = comp.cardDraw / total;
@@ -53,3 +52,6 @@ export function getPowerSignal(
 
   return Math.min(30, score);
 }
+
+/** Alias used by consumers that import `computePowerSignal` */
+export const computePowerSignal = getPowerSignal;

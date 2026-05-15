@@ -7,10 +7,10 @@ export interface ImportMeta {
 }
 
 export interface SavedDeck {
-  id: string;          // makeId() value
+  id: string;
   name: string;
-  updatedAt: number;   // Date.now()
-  mainboard: Record<string, number>; // oracleId -> quantity
+  updatedAt: number;
+  mainboard: Record<string, number>;
   sideboard: Record<string, number>;
   wins: number;
   losses: number;
@@ -18,12 +18,18 @@ export interface SavedDeck {
 }
 
 export interface MatchResult {
-  id?: number;         // auto-increment
+  id?: number;
   deckId: string;
-  opponent: string;    // free-text opponent deck name
+  opponent: string;
   result: "win" | "loss" | "draw";
   notes: string;
-  playedAt: number;    // Date.now()
+  playedAt: number;
+}
+
+export interface DatabaseStatus {
+  cardCount: number;
+  lastImportedAt: string | null;
+  isReady: boolean;
 }
 
 export class MTGDeckBuilderDB extends Dexie {
@@ -94,4 +100,17 @@ export async function replaceAllCards(cards: CardRecord[], importedAt: string) {
       { key: "cardCount",      value: String(cards.length) },
     ]);
   });
+}
+
+export async function getDatabaseStatus(): Promise<DatabaseStatus> {
+  const [cardCountMeta, lastImportedAtMeta] = await Promise.all([
+    db.meta.get("cardCount"),
+    db.meta.get("lastImportedAt"),
+  ]);
+  const cardCount = cardCountMeta ? parseInt(cardCountMeta.value, 10) : 0;
+  return {
+    cardCount,
+    lastImportedAt: lastImportedAtMeta?.value ?? null,
+    isReady: cardCount > 0,
+  };
 }

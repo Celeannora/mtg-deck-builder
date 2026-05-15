@@ -85,7 +85,6 @@ export function computeSynergyScore(
 
   for (const [kw, freq] of fingerprint) {
     if (cardText.includes(kw)) {
-      // More copies of the keyword in the deck = stronger synergy signal
       const weight = freq >= 8 ? 8 : freq >= 4 ? 5 : 3;
       score += weight;
     }
@@ -93,6 +92,9 @@ export function computeSynergyScore(
 
   return Math.min(30, score);
 }
+
+/** Alias used by consumers that import `computeSynergy` */
+export const computeSynergy = computeSynergyScore;
 
 /**
  * Returns the top synergy keywords present in the deck (for display).
