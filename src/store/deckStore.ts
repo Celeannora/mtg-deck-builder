@@ -27,6 +27,7 @@ export interface DeckState {
   saveCurrentDeck: () => Promise<void>;
   loadSavedDeck: (id: string) => Promise<void>;
   deleteSavedDeck: (id: string) => Promise<void>;
+  renameSavedDeck: (id: string, name: string) => Promise<void>;
   newDeck: () => void;
 
   addCard: (card: CardRecord, board: "main" | "side") => void;
@@ -72,7 +73,7 @@ export const useDeckStore = create<DeckState>((set, get) => ({
   },
   companionCheck: null,
 
-  // ── Multi-deck ──────────────────────────────────────────────────────────────
+  // ── Multi-deck ───────────────────────────────────────────────────────────
 
   async loadSavedDecks() {
     const decks = await db.savedDecks.orderBy("updatedAt").reverse().toArray();
@@ -91,7 +92,6 @@ export const useDeckStore = create<DeckState>((set, get) => ({
       losses:    0,
       draws:     0,
     };
-    // Preserve existing win/loss/draw if we're overwriting
     const existing = await db.savedDecks.get(activeDeckId);
     if (existing) {
       record.wins   = existing.wins;
@@ -138,6 +138,16 @@ export const useDeckStore = create<DeckState>((set, get) => ({
     set({ savedDecks: decks });
   },
 
+  async renameSavedDeck(id: string, name: string) {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    await db.savedDecks.update(id, { name: trimmed });
+    // If this is the active deck, update deckName in store too
+    if (get().activeDeckId === id) set({ deckName: trimmed });
+    const decks = await db.savedDecks.orderBy("updatedAt").reverse().toArray();
+    set({ savedDecks: decks });
+  },
+
   newDeck() {
     const entries: DeckEntry[] = [];
     set({
@@ -149,7 +159,7 @@ export const useDeckStore = create<DeckState>((set, get) => ({
     });
   },
 
-  // ── Card editing ───────────────────────────────────────────────────────────
+  // ── Card editing ──────────────────────────────────────────────────────────
 
   addCard(card, board) {
     const { entries } = get();

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useDeckStore } from "../store/deckStore";
 import type { SavedDeck } from "../lib/db";
 
@@ -16,6 +16,115 @@ interface Props {
   onClose: () => void;
 }
 
+// ── Inline rename row ──────────────────────────────────────────────────────
+
+interface DeckRowProps {
+  deck: SavedDeck;
+  isActive: boolean;
+  confirming: boolean;
+  onLoad: () => void;
+  onDelete: () => void;
+  onRename: (name: string) => void;
+}
+
+function DeckRow({ deck, isActive, confirming, onLoad, onDelete, onRename }: DeckRowProps) {
+  const [editing, setEditing]   = useState(false);
+  const [draft, setDraft]       = useState(deck.name);
+  const inputRef                = useRef<HTMLInputElement>(null);
+
+  // Sync draft when deck name changes externally
+  useEffect(() => { if (!editing) setDraft(deck.name); }, [deck.name, editing]);
+
+  const startEdit = () => {
+    setDraft(deck.name);
+    setEditing(true);
+    // Focus + select all on next tick after render
+    setTimeout(() => { inputRef.current?.select(); }, 0);
+  };
+
+  const commit = () => {
+    setEditing(false);
+    if (draft.trim() && draft.trim() !== deck.name) onRename(draft.trim());
+    else setDraft(deck.name);
+  };
+
+  const cancel = () => {
+    setEditing(false);
+    setDraft(deck.name);
+  };
+
+  return (
+    <div
+      className={`group flex items-start justify-between gap-2 px-3 py-2.5 border-b border-zinc-900 hover:bg-zinc-900 ${
+        isActive ? "bg-zinc-900 border-l-2 border-l-teal-500" : ""
+      }`}
+    >
+      <div className="flex-1 min-w-0">
+        {editing ? (
+          <input
+            ref={inputRef}
+            value={draft}
+            onChange={e => setDraft(e.target.value)}
+            onBlur={commit}
+            onKeyDown={e => {
+              if (e.key === "Enter")  { e.preventDefault(); commit(); }
+              if (e.key === "Escape") { e.preventDefault(); cancel(); }
+            }}
+            className="w-full rounded border border-teal-600 bg-zinc-800 px-1.5 py-0.5 text-xs font-medium text-zinc-100 outline-none ring-1 ring-teal-500/40"
+            aria-label="Rename deck"
+          />
+        ) : (
+          <button
+            onClick={onLoad}
+            onDoubleClick={e => { e.stopPropagation(); startEdit(); }}
+            className="w-full text-left"
+          >
+            <p className="truncate text-xs font-medium text-zinc-200">{deck.name}</p>
+            <p className="text-xs text-zinc-500 mt-0.5">
+              <span className="text-teal-400 font-medium">{winRate(deck)}</span>
+              {" "}
+              <span className="text-zinc-600">{recordStr(deck)}</span>
+            </p>
+            <p className="text-xs text-zinc-700">
+              {new Date(deck.updatedAt).toLocaleDateString()}
+            </p>
+          </button>
+        )}
+      </div>
+
+      {/* Action buttons — pencil + delete */}
+      <div className="flex shrink-0 mt-0.5 gap-1">
+        {!editing && (
+          <button
+            onClick={e => { e.stopPropagation(); startEdit(); }}
+            className="rounded p-0.5 text-zinc-600 opacity-0 group-hover:opacity-100 hover:text-zinc-300 transition-opacity"
+            title="Rename deck"
+            aria-label="Rename deck"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-3 w-3">
+              <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+              <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+            </svg>
+          </button>
+        )}
+        <button
+          onClick={onDelete}
+          className={`shrink-0 rounded px-1.5 py-0.5 text-xs transition-colors ${
+            confirming
+              ? "bg-red-900 text-red-200"
+              : "text-zinc-600 hover:text-red-400"
+          }`}
+          title={confirming ? "Click again to confirm" : "Delete deck"}
+        >
+          {confirming ? "Sure?" : "✕"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ── Main panel ──────────────────────────────────────────────────────────────
+
 export function DeckListPanel({ onClose }: Props) {
   const {
     activeDeckId,
@@ -25,10 +134,11 @@ export function DeckListPanel({ onClose }: Props) {
     saveCurrentDeck,
     loadSavedDeck,
     deleteSavedDeck,
+    renameSavedDeck,
     newDeck,
   } = useDeckStore();
 
-  const [saving, setSaving] = useState(false);
+  const [saving, setSaving]   = useState(false);
   const [confirm, setConfirm] = useState<string | null>(null);
 
   useEffect(() => { loadSavedDecks(); }, []);
@@ -90,38 +200,15 @@ export function DeckListPanel({ onClose }: Props) {
           </div>
         )}
         {savedDecks.map(deck => (
-          <div
+          <DeckRow
             key={deck.id}
-            className={`group flex items-start justify-between gap-2 px-3 py-2.5 border-b border-zinc-900 hover:bg-zinc-900 ${
-              deck.id === activeDeckId ? "bg-zinc-900 border-l-2 border-l-teal-500" : ""
-            }`}
-          >
-            <button
-              onClick={() => handleLoad(deck.id)}
-              className="flex-1 text-left min-w-0"
-            >
-              <p className="truncate text-xs font-medium text-zinc-200">{deck.name}</p>
-              <p className="text-xs text-zinc-500 mt-0.5">
-                <span className="text-teal-400 font-medium">{winRate(deck)}</span>
-                {" "}
-                <span className="text-zinc-600">{recordStr(deck)}</span>
-              </p>
-              <p className="text-xs text-zinc-700">
-                {new Date(deck.updatedAt).toLocaleDateString()}
-              </p>
-            </button>
-            <button
-              onClick={() => handleDelete(deck.id)}
-              className={`shrink-0 mt-0.5 rounded px-1.5 py-0.5 text-xs transition-colors ${
-                confirm === deck.id
-                  ? "bg-red-900 text-red-200"
-                  : "text-zinc-600 hover:text-red-400"
-              }`}
-              title={confirm === deck.id ? "Click again to confirm" : "Delete deck"}
-            >
-              {confirm === deck.id ? "Sure?" : "✕"}
-            </button>
-          </div>
+            deck={deck}
+            isActive={deck.id === activeDeckId}
+            confirming={confirm === deck.id}
+            onLoad={() => handleLoad(deck.id)}
+            onDelete={() => handleDelete(deck.id)}
+            onRename={name => renameSavedDeck(deck.id, name)}
+          />
         ))}
       </div>
 
