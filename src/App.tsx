@@ -11,6 +11,7 @@ import { DeckComparePanel } from "./components/DeckComparePanel";
 import { DeckListPanel } from "./components/DeckListPanel";
 import { useDBStatus } from "./hooks/useDBStatus";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
+import { usePWAInstall } from "./hooks/usePWAInstall";
 import { useDeckStore } from "./store/deckStore";
 import { decodeShareableLink } from "./lib/deckExporter";
 import type { CardRecord } from "./lib/types";
@@ -72,7 +73,62 @@ function ShortcutModal({ onClose }: { onClose: () => void }) {
   );
 }
 
-// ── App ────────────────────────────────────────────────────────────────────────
+// ── PWA install banner ────────────────────────────────────────────────────────
+
+function InstallBanner({
+  isIOS,
+  onInstall,
+  onDismiss,
+}: {
+  isIOS: boolean;
+  onInstall: () => void;
+  onDismiss: () => void;
+}) {
+  return (
+    <div className="shrink-0 flex items-center justify-between gap-3 border-b border-zinc-800 bg-zinc-900 px-4 py-2 text-xs">
+      <div className="flex items-center gap-2 text-zinc-400">
+        {/* Simple download / home-screen icon */}
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-4 w-4 shrink-0 text-teal-400">
+          {isIOS
+            ? <path d="M12 2v13m0 0-3-3m3 3 3-3M5 17v2a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-2" />
+            : <><path d="M12 16V4" /><path d="m8 12 4 4 4-4" /><path d="M2 20h20" /></>}
+        </svg>
+        {isIOS ? (
+          <span>
+            Install: tap{" "}
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="inline h-3.5 w-3.5 align-text-bottom">
+              <path d="M12 2v13m0 0-3-3m3 3 3-3M5 17v2a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-2" />
+            </svg>
+            {" "}then <strong className="text-zinc-200">Add to Home Screen</strong>
+          </span>
+        ) : (
+          <span>Install app for offline use</span>
+        )}
+      </div>
+      <div className="flex shrink-0 items-center gap-2">
+        {!isIOS && (
+          <button
+            onClick={onInstall}
+            className="rounded bg-teal-700 px-2.5 py-1 text-xs font-medium text-white hover:bg-teal-600 transition-colors"
+          >
+            Install
+          </button>
+        )}
+        <button
+          onClick={onDismiss}
+          className="text-zinc-600 hover:text-zinc-300 transition-colors"
+          aria-label="Dismiss install prompt"
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-3.5 w-3.5">
+            <path d="M18 6 6 18M6 6l12 12" />
+          </svg>
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ── App ───────────────────────────────────────────────────────────────────────
 
 export default function App() {
   const [view, setView]               = useState<AppView>("builder");
@@ -90,6 +146,9 @@ export default function App() {
   const newDeck              = useDeckStore(s => s.newDeck);
   const saveCurrentDeck      = useDeckStore(s => s.saveCurrentDeck);
 
+  const { isInstallable, isIOS, installPrompt, dismiss: dismissInstall } = usePWAInstall();
+  const showInstallBanner = isInstallable || isIOS;
+
   // Stable ref for handlers so useKeyboardShortcuts doesn't re-subscribe on every render
   const handlersRef = useRef({
     onToggleCheatsheet: () => setCheatsheetOpen(o => !o),
@@ -106,7 +165,6 @@ export default function App() {
     mobilePanelCount: MOBILE_PANELS.length,
   });
 
-  // Keep ref current without triggering hook re-subscription
   useEffect(() => {
     handlersRef.current.onEscape = () => {
       if (cheatsheetOpen) { setCheatsheetOpen(false); return; }
@@ -141,6 +199,15 @@ export default function App() {
     <div className="flex h-[100dvh] flex-col overflow-hidden bg-zinc-950 text-zinc-100">
       <Header view={view} onViewChange={v => { setView(v); setMobilePanelIdx(0); }} />
       <DatabaseStatusBar onRequestImport={() => { setView("import"); setImportMode("db"); }} />
+
+      {/* PWA install banner — sits below the DB status bar */}
+      {showInstallBanner && (
+        <InstallBanner
+          isIOS={isIOS}
+          onInstall={installPrompt}
+          onDismiss={dismissInstall}
+        />
+      )}
 
       {swUpdateReady && (
         <div className="shrink-0 flex items-center justify-between gap-3 bg-teal-900/60 border-b border-teal-700 px-4 py-2 text-sm">
@@ -241,7 +308,6 @@ export default function App() {
                     </svg>
                     My Decks
                   </button>
-                  {/* Shortcut hint */}
                   <button
                     onClick={() => setCheatsheetOpen(o => !o)}
                     className="ml-auto rounded px-1.5 py-0.5 text-xs text-zinc-600 hover:text-zinc-400 transition-colors"
