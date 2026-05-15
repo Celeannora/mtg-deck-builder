@@ -6,6 +6,8 @@ import { getWhatsMissing, type MissingReport } from "../lib/whatsMissing";
 import { findCombos, type ComboResult } from "../lib/comboFinder";
 import { analyzeBudget, type BudgetAnalysis } from "../lib/budgetOptimizer";
 import type { Archetype } from "../lib/archetype";
+import type { DeckEntry } from "../lib/legality";
+import type { CardRecord } from "../lib/types";
 
 type AdvisorTab = "wizard" | "optimize" | "missing" | "combos" | "budget";
 
@@ -21,11 +23,23 @@ const ARCHETYPES: Archetype[] = [
   "Aggro","Burn","Midrange","Control","Combo","Tempo","Ramp","Tokens","Graveyard","Sacrifice"
 ];
 const COLORS = ["W","U","B","R","G"];
-const COLOR_LABELS: Record<string,string> = { W:"White",U:"Blue",B:"Black",R:"Red",G:"Green" };
+
+/** Replace the entire deck with new entries via store actions (preserves revalidation + companion check). */
+function useReplaceEntries() {
+  const clearDeck = useDeckStore(s => s.clearDeck);
+  const addCard   = useDeckStore(s => s.addCard);
+  return (entries: DeckEntry[]) => {
+    clearDeck();
+    for (const { card, quantity, board } of entries) {
+      for (let i = 0; i < quantity; i++) addCard(card, board);
+    }
+  };
+}
 
 export function AdvisorPanel() {
   const [tab, setTab] = useState<AdvisorTab>("wizard");
-  const { entries, setEntries } = useDeckStore();
+  const entries = useDeckStore(s => s.entries);
+  const replaceEntries = useReplaceEntries();
 
   return (
     <div className="flex flex-col h-full">
@@ -40,11 +54,11 @@ export function AdvisorPanel() {
         ))}
       </div>
       <div className="flex-1 overflow-y-auto p-3 text-sm">
-        {tab === "wizard"   && <WizardTab entries={entries} setEntries={setEntries} />}
-        {tab === "optimize" && <OptimizeTab entries={entries} setEntries={setEntries} />}
-        {tab === "missing"  && <MissingTab entries={entries} />}
-        {tab === "combos"   && <CombosTab  entries={entries} />}
-        {tab === "budget"   && <BudgetTab  entries={entries} setEntries={setEntries} />}
+        {tab === "wizard"   && <WizardTab   entries={entries} replaceEntries={replaceEntries} />}
+        {tab === "optimize" && <OptimizeTab entries={entries} replaceEntries={replaceEntries} />}
+        {tab === "missing"  && <MissingTab  entries={entries} />}
+        {tab === "combos"   && <CombosTab   entries={entries} />}
+        {tab === "budget"   && <BudgetTab   entries={entries} replaceEntries={replaceEntries} />}
       </div>
     </div>
   );
@@ -52,18 +66,18 @@ export function AdvisorPanel() {
 
 // ─── Wizard ────────────────────────────────────────────────────────────────
 function WizardTab({
-  entries, setEntries
-}: { entries: any[]; setEntries: (e: any[]) => void }) {
+  entries, replaceEntries
+}: { entries: DeckEntry[]; replaceEntries: (e: DeckEntry[]) => void }) {
   const [archetype, setArchetype] = useState<Archetype>("Midrange");
   const [colors, setColors] = useState<string[]>(["W","U"]);
-  const [budget, setBudget] = useState<string>("");
-  const [anchors, setAnchors] = useState<string>("");
+  const [budget, setBudget] = useState("");
+  const [anchors, setAnchors] = useState("");
   const [loading, setLoading] = useState(false);
   const [warnings, setWarnings] = useState<string[]>([]);
   const [done, setDone] = useState(false);
 
   const toggleColor = (c: string) =>
-    setColors((prev) => prev.includes(c) ? prev.filter((x) => x !== c) : [...prev, c]);
+    setColors(prev => prev.includes(c) ? prev.filter(x => x !== c) : [...prev, c]);
 
   const run = async () => {
     setLoading(true); setDone(false); setWarnings([]);
@@ -72,10 +86,10 @@ function WizardTab({
         archetype,
         colors,
         budgetUsd: budget ? parseFloat(budget) : null,
-        anchorCardIds: anchors.split(",").map((s) => s.trim()).filter(Boolean),
+        anchorCardIds: anchors.split(",").map(s => s.trim()).filter(Boolean),
       };
       const result = await runBuildWizard(input);
-      setEntries(result.entries);
+      replaceEntries(result.entries);
       setWarnings(result.warnings);
       setDone(true);
     } catch (e) {
@@ -91,16 +105,16 @@ function WizardTab({
 
       <div>
         <label className="block mb-1 text-xs text-zinc-400">Archetype</label>
-        <select value={archetype} onChange={(e) => setArchetype(e.target.value as Archetype)}
+        <select value={archetype} onChange={e => setArchetype(e.target.value as Archetype)}
           className="w-full rounded bg-zinc-800 border border-zinc-700 px-2 py-1.5 text-zinc-100 text-xs">
-          {ARCHETYPES.map((a) => <option key={a} value={a}>{a}</option>)}
+          {ARCHETYPES.map(a => <option key={a} value={a}>{a}</option>)}
         </select>
       </div>
 
       <div>
         <label className="block mb-1 text-xs text-zinc-400">Colors</label>
         <div className="flex gap-2">
-          {COLORS.map((c) => (
+          {COLORS.map(c => (
             <button key={c} onClick={() => toggleColor(c)}
               className={`h-7 w-7 rounded-full text-xs font-bold border transition-colors ${
                 colors.includes(c)
@@ -115,15 +129,15 @@ function WizardTab({
 
       <div>
         <label className="block mb-1 text-xs text-zinc-400">Budget cap (USD, optional)</label>
-        <input type="number" value={budget} onChange={(e) => setBudget(e.target.value)}
+        <input type="number" value={budget} onChange={e => setBudget(e.target.value)}
           placeholder="e.g. 200"
           className="w-full rounded bg-zinc-800 border border-zinc-700 px-2 py-1.5 text-zinc-100 text-xs" />
       </div>
 
       <div>
         <label className="block mb-1 text-xs text-zinc-400">Anchor card IDs (comma-separated, optional)</label>
-        <input type="text" value={anchors} onChange={(e) => setAnchors(e.target.value)}
-          placeholder="Scryfall UUID, UUID, ..."
+        <input type="text" value={anchors} onChange={e => setAnchors(e.target.value)}
+          placeholder="Scryfall UUID, UUID, …"
           className="w-full rounded bg-zinc-800 border border-zinc-700 px-2 py-1.5 text-zinc-100 text-xs" />
       </div>
 
@@ -132,9 +146,15 @@ function WizardTab({
         {loading ? "Building…" : "Generate Deck"}
       </button>
 
-      {done && <div className="rounded bg-emerald-900/40 border border-emerald-700 px-3 py-2 text-xs text-emerald-300">✓ Deck generated and loaded into canvas.</div>}
+      {done && (
+        <div className="rounded bg-emerald-900/40 border border-emerald-700 px-3 py-2 text-xs text-emerald-300">
+          ✓ Deck generated and loaded into canvas.
+        </div>
+      )}
       {warnings.map((w, i) => (
-        <div key={i} className="rounded bg-yellow-900/30 border border-yellow-700 px-3 py-2 text-xs text-yellow-300">⚠ {w}</div>
+        <div key={i} className="rounded bg-yellow-900/30 border border-yellow-700 px-3 py-2 text-xs text-yellow-300">
+          ⚠ {w}
+        </div>
       ))}
     </div>
   );
@@ -142,8 +162,8 @@ function WizardTab({
 
 // ─── Optimize ──────────────────────────────────────────────────────────────
 function OptimizeTab({
-  entries, setEntries
-}: { entries: any[]; setEntries: (e: any[]) => void }) {
+  entries, replaceEntries
+}: { entries: DeckEntry[]; replaceEntries: (e: DeckEntry[]) => void }) {
   const [suggestions, setSuggestions] = useState<SwapSuggestion[]>([]);
   const [loading, setLoading] = useState(false);
 
@@ -155,11 +175,13 @@ function OptimizeTab({
   };
 
   const accept = (swap: SwapSuggestion) => {
-    const updated = entries.map((e) =>
-      e.card.id === swap.remove.id && e.board === "main" ? { ...e, card: swap.add } : e
+    const updated = entries.map(e =>
+      e.card.id === swap.remove.id && e.board === "main"
+        ? { ...e, card: swap.add }
+        : e
     );
-    setEntries(updated);
-    setSuggestions((prev) => prev.filter((s) => s.remove.id !== swap.remove.id));
+    replaceEntries(updated);
+    setSuggestions(prev => prev.filter(s => s.remove.id !== swap.remove.id));
   };
 
   return (
@@ -176,7 +198,7 @@ function OptimizeTab({
         <p className="text-xs text-zinc-500">Click Run to analyze the bottom 10 cards and suggest upgrades.</p>
       )}
 
-      {suggestions.map((s) => (
+      {suggestions.map(s => (
         <div key={s.remove.id} className="rounded-lg border border-zinc-700 bg-zinc-900 p-3 flex flex-col gap-1.5">
           <div className="flex items-center justify-between">
             <span className="text-xs text-red-400">Remove: {s.remove.name}</span>
@@ -186,7 +208,7 @@ function OptimizeTab({
             <span className="text-xs text-emerald-400">Add: {s.add.name}</span>
             <span className="font-mono text-xs text-zinc-300">{s.scoreAfter.toFixed(1)}</span>
           </div>
-          <div className="text-xs text-zinc-500">{s.reason}</div>
+          <p className="text-xs text-zinc-500">{s.reason}</p>
           <button onClick={() => accept(s)}
             className="self-end rounded bg-teal-800 px-3 py-1 text-xs hover:bg-teal-700">
             Accept Swap
@@ -198,22 +220,23 @@ function OptimizeTab({
 }
 
 // ─── Gaps ──────────────────────────────────────────────────────────────────
-function MissingTab({ entries }: { entries: any[] }) {
+function MissingTab({ entries }: { entries: DeckEntry[] }) {
   const [reports, setReports] = useState<MissingReport[]>([]);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     if (entries.length < 10) return;
     setLoading(true);
-    getWhatsMissing(entries).then((r) => { setReports(r); setLoading(false); });
+    getWhatsMissing(entries).then(r => { setReports(r); setLoading(false); });
   }, [entries]);
 
+  if (entries.length < 10) return <p className="text-xs text-zinc-500">Add at least 10 cards to detect gaps.</p>;
   if (loading) return <p className="text-xs text-zinc-500">Analyzing gaps…</p>;
   if (reports.length === 0) return <p className="text-xs text-zinc-500">No gaps detected. Looking good!</p>;
 
   return (
     <div className="flex flex-col gap-3">
-      <h3 className="font-semibold text-zinc-100">What’s Missing?</h3>
+      <h3 className="font-semibold text-zinc-100">What's Missing?</h3>
       {reports.map((r, i) => (
         <div key={i} className="rounded-lg border border-yellow-800/50 bg-yellow-950/20 p-3">
           <div className="flex items-center gap-2 mb-1">
@@ -223,7 +246,7 @@ function MissingTab({ entries }: { entries: any[] }) {
           <p className="text-xs text-zinc-400 mb-2">{r.message}</p>
           {r.suggestions.length > 0 && (
             <div className="flex flex-wrap gap-1">
-              {r.suggestions.map((c) => (
+              {r.suggestions.map(c => (
                 <span key={c.id} className="rounded bg-zinc-800 px-2 py-0.5 text-xs text-zinc-300">
                   {c.name}
                 </span>
@@ -237,14 +260,13 @@ function MissingTab({ entries }: { entries: any[] }) {
 }
 
 // ─── Combos ────────────────────────────────────────────────────────────────
-function CombosTab({ entries }: { entries: any[] }) {
+function CombosTab({ entries }: { entries: DeckEntry[] }) {
   const combos = useMemo(() => findCombos(entries), [entries]);
-  const { addCard } = useDeckStore();
 
   const CONFIDENCE_COLOR: Record<string, string> = {
-    high: "text-emerald-400",
+    high:   "text-emerald-400",
     medium: "text-yellow-400",
-    low: "text-zinc-500",
+    low:    "text-zinc-500",
   };
 
   if (combos.length === 0) {
@@ -271,8 +293,8 @@ function CombosTab({ entries }: { entries: any[] }) {
 
 // ─── Budget ────────────────────────────────────────────────────────────────
 function BudgetTab({
-  entries, setEntries
-}: { entries: any[]; setEntries: (e: any[]) => void }) {
+  entries, replaceEntries
+}: { entries: DeckEntry[]; replaceEntries: (e: DeckEntry[]) => void }) {
   const [capStr, setCapStr] = useState("400");
   const [analysis, setAnalysis] = useState<BudgetAnalysis | null>(null);
   const [loading, setLoading] = useState(false);
@@ -284,11 +306,16 @@ function BudgetTab({
     setLoading(false);
   };
 
-  const acceptSwap = (swap: any) => {
-    const updated = entries.map((e: any) =>
-      e.card.id === swap.current.id && e.board === "main" ? { ...e, card: swap.upgrade } : e
+  const acceptSwap = (swap: BudgetAnalysis["swaps"][number]) => {
+    const updated = entries.map(e =>
+      e.card.id === swap.current.id && e.board === "main"
+        ? { ...e, card: swap.upgrade }
+        : e
     );
-    setEntries(updated);
+    replaceEntries(updated);
+    setAnalysis(prev =>
+      prev ? { ...prev, swaps: prev.swaps.filter(s => s.current.id !== swap.current.id) } : null
+    );
   };
 
   return (
@@ -297,7 +324,7 @@ function BudgetTab({
       <div className="flex gap-2 items-end">
         <div className="flex-1">
           <label className="block mb-1 text-xs text-zinc-400">Target budget (USD)</label>
-          <input type="number" value={capStr} onChange={(e) => setCapStr(e.target.value)}
+          <input type="number" value={capStr} onChange={e => setCapStr(e.target.value)}
             className="w-full rounded bg-zinc-800 border border-zinc-700 px-2 py-1.5 text-xs text-zinc-100" />
         </div>
         <button onClick={run} disabled={loading}

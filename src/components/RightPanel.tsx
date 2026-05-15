@@ -11,12 +11,13 @@ import { CollectionPanel } from "./CollectionPanel";
 import { DeckHistoryPanel } from "./DeckHistoryPanel";
 import { MetagamePanel } from "./MetagamePanel";
 import { DeckExportPanel } from "./DeckExportPanel";
+import { AdvisorPanel } from "./AdvisorPanel";
 import { useDeckStore, useMainboardEntries, useSideboardEntries } from "../store/deckStore";
 import type { DeckSnapshot } from "../lib/deckHistory";
 
 type Tab =
   | "curve" | "mana" | "archetype" | "validate" | "gameplan"
-  | "bo3" | "sideboard" | "collection" | "history" | "export" | "meta";
+  | "bo3" | "sideboard" | "collection" | "history" | "export" | "meta" | "advisor";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "curve",      label: "Curve" },
@@ -26,6 +27,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: "gameplan",   label: "Plan" },
   { id: "bo3",        label: "Bo3" },
   { id: "sideboard",  label: "Side" },
+  { id: "advisor",    label: "Advisor" },
   { id: "collection", label: "Collect" },
   { id: "history",    label: "History" },
   { id: "export",     label: "Export" },
@@ -44,7 +46,6 @@ export function RightPanel({ activeDeckId }: Props) {
   const deckName    = useDeckStore(s => s.deckName);
   const loadFromSnapshot = useDeckStore(s => s.loadFromSnapshot);
 
-  // CardRecord arrays — derived directly from entries (no extra Dexie fetch)
   const mainCards = useMemo(() => mainEntries.map(e => e.card), [mainEntries]);
   const sideCards = useMemo(() => sideEntries.map(e => e.card), [sideEntries]);
 
@@ -107,6 +108,7 @@ export function RightPanel({ activeDeckId }: Props) {
         {tab === "sideboard"  && (
           <SideboardPlanPanel mainboard={mainCards} sideboard={sideCards} />
         )}
+        {tab === "advisor"    && <AdvisorPanel />}
         {tab === "collection" && <CollectionPanel deckCards={deckCards} />}
         {tab === "history"    && (
           <DeckHistoryPanel
