@@ -52,8 +52,8 @@
 
 | Priority | Task | Notes |
 |----------|------|-------|
+| High | Commit package.json + package-lock.json to the repo | They are currently gitignored/missing; CI relies on `npm ci` which requires both. The `@vitest/coverage-v8` band-aid in ci.yml can be removed once the lockfile is committed and the package is in devDependencies |
 | High | Deck B enrichment for cards not in local DB | Currently silently drops cmc/typeLine for unknown cards |
-| High | `@vitest/coverage-v8` must be in devDependencies | CI will fail if missing |
 | Medium | Match tracker: link win/loss to saved deck record correctly when deck was never saved | Currently skips W/L/D update if deck not in savedDecks table |
 | Medium | DeckListPanel: inline rename (click name to edit in-place) | |
 | Medium | Price trend sparkline per card | Requires historical price data source |
@@ -61,7 +61,7 @@
 | Low | PWA install prompt / "Add to Home Screen" banner | SW exists, no prompt yet |
 | Low | Keyboard shortcuts (Ctrl+K search, N new deck, S save) | |
 | Low | Accessibility audit (screen reader labels, skip link) | |
-| Low | Remove dead Python prototype files (main.py, core/, ui/) | Safe to delete; no longer used |
+| Low | Remove dead Python prototype files (main.py, core/, ui/, requirements.txt) | Safe to delete; no longer used |
 
 ---
 
