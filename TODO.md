@@ -17,6 +17,7 @@
 | Vitest test suite (12 files) | legality, mana, companion, consistency, search, rotation, rotationImpact, bo3, hypergeometric, handSimulator, scryfall, manaBase |
 | GitHub Actions CI (lint → tsc → vitest --coverage → build) | Coverage comment on PRs via vitest-coverage-report-action |
 | ESLint flat config | |
+| package.json committed to repo | Reconstructed from source imports; @vitest/coverage-v8 band-aid in ci.yml removed |
 
 ---
 
@@ -52,7 +53,7 @@
 
 | Priority | Task | Notes |
 |----------|------|-------|
-| High | Commit package.json + package-lock.json to the repo | They are currently gitignored/missing; CI relies on `npm ci` which requires both. The `@vitest/coverage-v8` band-aid in ci.yml can be removed once the lockfile is committed and the package is in devDependencies |
+| **High** | Commit package-lock.json to the repo | Run `npm install` locally then commit the lockfile — `npm ci` in CI requires it |
 | High | Deck B enrichment for cards not in local DB | Currently silently drops cmc/typeLine for unknown cards |
 | Medium | Match tracker: link win/loss to saved deck record correctly when deck was never saved | Currently skips W/L/D update if deck not in savedDecks table |
 | Medium | DeckListPanel: inline rename (click name to edit in-place) | |
@@ -65,4 +66,4 @@
 
 ---
 
-*Last updated: 2026-05-14*
+*Last updated: 2026-05-15*
