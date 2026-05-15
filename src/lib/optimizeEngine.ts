@@ -1,7 +1,7 @@
 import type { DeckEntry } from "./legality";
 import type { CardRecord } from "./types";
 import { computeSynergy } from "./synergy";
-import { computePowerSignal } from "./powerSignal";
+import { getPowerSignal } from "./powerSignal";
 import { db } from "./db";
 
 export interface SwapSuggestion {
@@ -15,8 +15,8 @@ export interface SwapSuggestion {
 
 function cardScore(card: CardRecord, entries: DeckEntry[]): number {
   const syn = computeSynergy(card, entries);
-  const pw  = computePowerSignal(card, syn.score);
-  return pw.cardScore;
+  const signal = getPowerSignal(card, entries);
+  return syn.score * 0.5 + signal * 0.5;
 }
 
 async function getCandidatePool(entries: DeckEntry[]): Promise<CardRecord[]> {
@@ -36,23 +36,22 @@ async function getCandidatePool(entries: DeckEntry[]): Promise<CardRecord[]> {
 }
 
 export async function optimizeDeck(entries: DeckEntry[]): Promise<SwapSuggestion[]> {
-  const mainEntries = entries.filter((e) => e.board === "main" && !e.card.typeLine.includes("Land"));
+  const mainEntries = entries.filter(
+    (e) => e.board === "main" && !e.card.typeLine.includes("Land")
+  );
   const pool = await getCandidatePool(entries);
   const usedIds = new Set(entries.map((e) => e.card.id));
 
-  // Score every main card
-  const scored = mainEntries.map((e) => ({
-    entry: e,
-    score: cardScore(e.card, entries),
-  })).sort((a, b) => a.score - b.score);
+  const scored = mainEntries
+    .map((e) => ({ entry: e, score: cardScore(e.card, entries) }))
+    .sort((a, b) => a.score - b.score);
 
-  // Bottom 10 by score
   const bottom = scored.slice(0, Math.min(10, scored.length));
-
   const suggestions: SwapSuggestion[] = [];
 
   for (const { entry, score: scoreBefore } of bottom) {
-    // Find top 3 alternatives: same CMC ±1, not already in deck
+    const withoutEntry = entries.filter((e) => e.card.id !== entry.card.id);
+
     const alts = pool
       .filter(
         (c) =>
@@ -60,10 +59,7 @@ export async function optimizeDeck(entries: DeckEntry[]): Promise<SwapSuggestion
           Math.abs(c.cmc - entry.card.cmc) <= 1 &&
           c.id !== entry.card.id
       )
-      .map((c) => ({
-        card: c,
-        score: cardScore(c, entries.filter((e) => e.card.id !== entry.card.id)),
-      }))
+      .map((c) => ({ card: c, score: cardScore(c, withoutEntry) }))
       .sort((a, b) => b.score - a.score)
       .slice(0, 3);
 
@@ -75,7 +71,7 @@ export async function optimizeDeck(entries: DeckEntry[]): Promise<SwapSuggestion
           scoreBefore,
           scoreAfter: alt.score,
           delta: alt.score - scoreBefore,
-          reason: `Higher synergy + power signal at MV ${alt.card.cmc}`,
+          reason: `Higher synergy + role signal at MV ${alt.card.cmc}`,
         });
         break;
       }
