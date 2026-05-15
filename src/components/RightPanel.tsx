@@ -86,11 +86,21 @@ export function RightPanel({ activeDeckId }: Props) {
     <div className="flex flex-col h-full">
       <DeckStatsBar />
 
-      <div className="flex shrink-0 overflow-x-auto border-b border-zinc-800 scrollbar-none">
+      {/* Tab strip */}
+      <div
+        role="tablist"
+        aria-label="Analysis panels"
+        className="flex shrink-0 overflow-x-auto border-b border-zinc-800 scrollbar-none"
+      >
         {TABS.map((t) => (
           <button
             key={t.id}
+            role="tab"
+            id={`tab-${t.id}`}
+            aria-selected={tab === t.id}
+            aria-controls={`tabpanel-${t.id}`}
             onClick={() => setTab(t.id)}
+            tabIndex={tab === t.id ? 0 : -1}
             className={`shrink-0 px-3 py-2 text-xs font-medium whitespace-nowrap transition-colors ${
               tab === t.id
                 ? "border-b-2 border-teal-400 text-teal-300"
@@ -102,7 +112,13 @@ export function RightPanel({ activeDeckId }: Props) {
         ))}
       </div>
 
-      <div className="flex-1 overflow-y-auto p-3">
+      {/* Tab panel */}
+      <div
+        role="tabpanel"
+        id={`tabpanel-${tab}`}
+        aria-labelledby={`tab-${tab}`}
+        className="flex-1 overflow-y-auto p-3"
+      >
         {tab === "curve"       && <ManaCurveChart />}
         {tab === "mana"        && <ManaBasePanel />}
         {tab === "consistency" && <ConsistencyPanel />}

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { searchCards, type SearchFilters } from "../lib/search";
 import type { CardRecord } from "../lib/types";
 import { useDeckStore } from "../store/deckStore";
@@ -6,19 +6,19 @@ import { computeSynergy } from "../lib/synergy";
 
 const COLORS = ["W", "U", "B", "R", "G"];
 const COLOR_LABEL: Record<string, string> = {
-  W: "☀ White", U: "💧 Blue", B: "💀 Black", R: "🔥 Red", G: "🌲 Green",
+  W: "White", U: "Blue", B: "Black", R: "Red", G: "Green",
+};
+const COLOR_EMOJI: Record<string, string> = {
+  W: "☀", U: "💧", B: "💀", R: "🔥", G: "🌲",
 };
 const RARITIES = ["common", "uncommon", "rare", "mythic"];
 
 function ColorBadge({ colors }: { colors: string[] }) {
-  const SYMBOLS: Record<string, string> = {
-    W: "☀", U: "💧", B: "💀", R: "🔥", G: "🌲",
-  };
   if (!colors.length) return <span className="text-zinc-500 text-xs">Colorless</span>;
   return (
-    <span className="flex gap-0.5 text-xs">
+    <span className="flex gap-0.5 text-xs" aria-label={colors.map(c => COLOR_LABEL[c] ?? c).join(", ")}>
       {colors.map((c) => (
-        <span key={c}>{SYMBOLS[c] ?? c}</span>
+        <span key={c} aria-hidden="true">{COLOR_EMOJI[c] ?? c}</span>
       ))}
     </span>
   );
@@ -36,7 +36,10 @@ function CardRow({
   onCardClick?: (card: CardRecord) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
-  const synergy = deckCards.length > 0 ? computeSynergy(card, deckCards.map(c => ({ card: c, quantity: 1, board: "main" as const }))) : null;
+  const panelId = useId();
+  const synergy = deckCards.length > 0
+    ? computeSynergy(card, deckCards.map(c => ({ card: c, quantity: 1, board: "main" as const })))
+    : null;
   const colors = JSON.parse(card.colorIdentityJson) as string[];
 
   return (
@@ -48,7 +51,8 @@ function CardRow({
             else setExpanded((v) => !v);
           }}
           className="flex-1 text-left"
-          aria-expanded={expanded}
+          aria-expanded={onCardClick ? undefined : expanded}
+          aria-controls={onCardClick ? undefined : panelId}
         >
           <div className="flex items-center justify-between">
             <span className="text-sm font-medium text-zinc-100">{card.name}</span>
@@ -66,8 +70,9 @@ function CardRow({
                       ? "text-teal-400"
                       : "text-zinc-500"
                   }`}
+                  aria-label={`Synergy: ${synergy.stars} stars`}
                 >
-                  {"★".repeat(synergy.stars)}
+                  <span aria-hidden="true">{"★".repeat(synergy.stars)}</span>
                 </span>
               )}
             </div>
@@ -79,12 +84,12 @@ function CardRow({
           className="shrink-0 rounded bg-teal-700 px-2.5 py-1 text-xs font-medium text-white hover:bg-teal-500"
           aria-label={`Add ${card.name} to deck`}
         >
-          +
+          <span aria-hidden="true">+</span>
         </button>
       </div>
 
       {expanded && !onCardClick && (
-        <div className="mt-1 border-t border-zinc-800 pt-2 text-xs">
+        <div id={panelId} className="mt-1 border-t border-zinc-800 pt-2 text-xs">
           {card.imageNormal && (
             <img
               src={card.imageNormal}
@@ -113,20 +118,18 @@ function CardRow({
 }
 
 export function CardSearchPanel({ onCardClick }: { onCardClick?: (card: CardRecord) => void }) {
-  const addCard = useDeckStore((s) => s.addCard);
-  const entries = useDeckStore((s) => s.entries);
-  const deckCards = entries
-    .filter((e) => e.board === "main")
-    .map((e) => e.card);
+  const addCard   = useDeckStore((s) => s.addCard);
+  const entries   = useDeckStore((s) => s.entries);
+  const deckCards = entries.filter((e) => e.board === "main").map((e) => e.card);
 
-  const [query, setQuery] = useState("");
-  const [colors, setColors] = useState<string[]>([]);
+  const [query, setQuery]     = useState("");
+  const [colors, setColors]   = useState<string[]>([]);
   const [rarities, setRarities] = useState<string[]>([]);
-  const [cmcMin, setCmcMin] = useState<string>("");
-  const [cmcMax, setCmcMax] = useState<string>("");
-  const [sortBy, setSortBy] = useState<SearchFilters["sortBy"]>("name");
+  const [cmcMin, setCmcMin]   = useState<string>("");
+  const [cmcMax, setCmcMax]   = useState<string>("");
+  const [sortBy, setSortBy]   = useState<SearchFilters["sortBy"]>("name");
   const [results, setResults] = useState<CardRecord[]>([]);
-  const [offset, setOffset] = useState(0);
+  const [offset, setOffset]   = useState(0);
   const [loading, setLoading] = useState(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const PAGE = 30;
@@ -135,15 +138,15 @@ export function CardSearchPanel({ onCardClick }: { onCardClick?: (card: CardReco
     async (off: number) => {
       setLoading(true);
       const filters: SearchFilters = {
-        query: query || undefined,
-        colors: colors.length ? colors : undefined,
+        query:    query || undefined,
+        colors:   colors.length   ? colors   : undefined,
         rarities: rarities.length ? rarities : undefined,
-        cmcMin: cmcMin !== "" ? Number(cmcMin) : undefined,
-        cmcMax: cmcMax !== "" ? Number(cmcMax) : undefined,
+        cmcMin:   cmcMin !== ""   ? Number(cmcMin) : undefined,
+        cmcMax:   cmcMax !== ""   ? Number(cmcMax) : undefined,
         sortBy,
-        sortDir: "asc",
-        limit: PAGE,
-        offset: off,
+        sortDir:  "asc",
+        limit:    PAGE,
+        offset:   off,
       };
       const data = await searchCards(filters);
       setResults((prev) => (off === 0 ? data : [...prev, ...data]));
@@ -156,9 +159,7 @@ export function CardSearchPanel({ onCardClick }: { onCardClick?: (card: CardReco
     setOffset(0);
     if (timerRef.current) clearTimeout(timerRef.current);
     timerRef.current = setTimeout(() => run(0), 300);
-    return () => {
-      if (timerRef.current) clearTimeout(timerRef.current);
-    };
+    return () => { if (timerRef.current) clearTimeout(timerRef.current); };
   }, [run]);
 
   const loadMore = () => {
@@ -167,52 +168,56 @@ export function CardSearchPanel({ onCardClick }: { onCardClick?: (card: CardReco
     run(next);
   };
 
-  const toggleColor = (c: string) =>
-    setColors((prev) =>
-      prev.includes(c) ? prev.filter((x) => x !== c) : [...prev, c]
-    );
+  const toggleColor  = (c: string) => setColors(prev => prev.includes(c) ? prev.filter(x => x !== c) : [...prev, c]);
+  const toggleRarity = (r: string) => setRarities(prev => prev.includes(r) ? prev.filter(x => x !== r) : [...prev, r]);
 
-  const toggleRarity = (r: string) =>
-    setRarities((prev) =>
-      prev.includes(r) ? prev.filter((x) => x !== r) : [...prev, r]
-    );
+  const resultAnnouncement = loading
+    ? "Searching…"
+    : results.length === 0
+    ? "No cards found"
+    : `${results.length} card${results.length === 1 ? "" : "s"} found`;
 
   return (
     <div className="flex h-full flex-col gap-3 p-3">
       {/* Search bar */}
       <div>
+        <label htmlFor="card-search-input" className="sr-only">Search cards</label>
         <input
+          id="card-search-input"
+          data-shortcut="search"
           type="search"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search cards..."
+          placeholder="Search cards…"
           className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-100 placeholder-zinc-500 focus:border-teal-500 focus:outline-none"
         />
       </div>
 
       {/* Color filters */}
-      <div className="flex flex-wrap gap-2">
+      <div className="flex flex-wrap gap-2" role="group" aria-label="Filter by color">
         {COLORS.map((c) => (
           <button
             key={c}
             onClick={() => toggleColor(c)}
+            aria-pressed={colors.includes(c)}
             className={`rounded-full px-2.5 py-0.5 text-xs font-medium transition-colors ${
               colors.includes(c)
                 ? "bg-teal-600 text-white"
                 : "bg-zinc-800 text-zinc-400 hover:bg-zinc-700"
             }`}
           >
-            {COLOR_LABEL[c]}
+            <span aria-hidden="true">{COLOR_EMOJI[c]} </span>{COLOR_LABEL[c]}
           </button>
         ))}
       </div>
 
       {/* Rarity filters */}
-      <div className="flex flex-wrap gap-2">
+      <div className="flex flex-wrap gap-2" role="group" aria-label="Filter by rarity">
         {RARITIES.map((r) => (
           <button
             key={r}
             onClick={() => toggleRarity(r)}
+            aria-pressed={rarities.includes(r)}
             className={`rounded-full px-2.5 py-0.5 text-xs font-medium capitalize transition-colors ${
               rarities.includes(r)
                 ? "bg-teal-600 text-white"
@@ -226,23 +231,31 @@ export function CardSearchPanel({ onCardClick }: { onCardClick?: (card: CardReco
 
       {/* CMC + sort */}
       <div className="flex gap-2">
+        <label htmlFor="cmc-min" className="sr-only">Minimum CMC</label>
         <input
+          id="cmc-min"
           type="number"
           min={0}
           value={cmcMin}
           onChange={(e) => setCmcMin(e.target.value)}
           placeholder="CMC min"
+          aria-label="Minimum converted mana cost"
           className="w-20 rounded border border-zinc-700 bg-zinc-900 px-2 py-1 text-xs text-zinc-100 placeholder-zinc-500"
         />
+        <label htmlFor="cmc-max" className="sr-only">Maximum CMC</label>
         <input
+          id="cmc-max"
           type="number"
           min={0}
           value={cmcMax}
           onChange={(e) => setCmcMax(e.target.value)}
           placeholder="CMC max"
+          aria-label="Maximum converted mana cost"
           className="w-20 rounded border border-zinc-700 bg-zinc-900 px-2 py-1 text-xs text-zinc-100 placeholder-zinc-500"
         />
+        <label htmlFor="sort-by" className="sr-only">Sort by</label>
         <select
+          id="sort-by"
           value={sortBy}
           onChange={(e) => setSortBy(e.target.value as SearchFilters["sortBy"])}
           className="rounded border border-zinc-700 bg-zinc-900 px-2 py-1 text-xs text-zinc-100"
@@ -255,8 +268,13 @@ export function CardSearchPanel({ onCardClick }: { onCardClick?: (card: CardReco
         </select>
       </div>
 
+      {/* Live region for result count */}
+      <div role="status" aria-live="polite" aria-atomic="true" className="sr-only">
+        {resultAnnouncement}
+      </div>
+
       {/* Results */}
-      <div className="flex-1 overflow-y-auto space-y-2 pr-1">
+      <div className="flex-1 overflow-y-auto space-y-2 pr-1" aria-label="Search results">
         {results.map((card) => (
           <CardRow
             key={card.id}
@@ -267,7 +285,7 @@ export function CardSearchPanel({ onCardClick }: { onCardClick?: (card: CardReco
           />
         ))}
         {loading && (
-          <p className="text-center text-xs text-zinc-500 py-4">Loading...</p>
+          <p className="text-center text-xs text-zinc-500 py-4" aria-live="polite">Loading…</p>
         )}
         {!loading && results.length >= PAGE && (
           <button

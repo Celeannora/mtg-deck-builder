@@ -52,7 +52,7 @@ function ShortcutModal({ onClose }: { onClose: () => void }) {
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-sm font-semibold text-zinc-100">Keyboard Shortcuts</h2>
           <button onClick={onClose} className="text-zinc-500 hover:text-zinc-200" aria-label="Close">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-4 w-4">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-4 w-4" aria-hidden="true">
               <path d="M18 6 6 18M6 6l12 12" />
             </svg>
           </button>
@@ -85,10 +85,13 @@ function InstallBanner({
   onDismiss: () => void;
 }) {
   return (
-    <div className="shrink-0 flex items-center justify-between gap-3 border-b border-zinc-800 bg-zinc-900 px-4 py-2 text-xs">
+    <div
+      className="shrink-0 flex items-center justify-between gap-3 border-b border-zinc-800 bg-zinc-900 px-4 py-2 text-xs"
+      role="region"
+      aria-label="Install app"
+    >
       <div className="flex items-center gap-2 text-zinc-400">
-        {/* Simple download / home-screen icon */}
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-4 w-4 shrink-0 text-teal-400">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-4 w-4 shrink-0 text-teal-400" aria-hidden="true">
           {isIOS
             ? <path d="M12 2v13m0 0-3-3m3 3 3-3M5 17v2a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-2" />
             : <><path d="M12 16V4" /><path d="m8 12 4 4 4-4" /><path d="M2 20h20" /></>}
@@ -96,7 +99,7 @@ function InstallBanner({
         {isIOS ? (
           <span>
             Install: tap{" "}
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="inline h-3.5 w-3.5 align-text-bottom">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="inline h-3.5 w-3.5 align-text-bottom" aria-hidden="true">
               <path d="M12 2v13m0 0-3-3m3 3 3-3M5 17v2a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-2" />
             </svg>
             {" "}then <strong className="text-zinc-200">Add to Home Screen</strong>
@@ -119,7 +122,7 @@ function InstallBanner({
           className="text-zinc-600 hover:text-zinc-300 transition-colors"
           aria-label="Dismiss install prompt"
         >
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-3.5 w-3.5">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-3.5 w-3.5" aria-hidden="true">
             <path d="M18 6 6 18M6 6l12 12" />
           </svg>
         </button>
@@ -149,7 +152,6 @@ export default function App() {
   const { isInstallable, isIOS, installPrompt, dismiss: dismissInstall } = usePWAInstall();
   const showInstallBanner = isInstallable || isIOS;
 
-  // Stable ref for handlers so useKeyboardShortcuts doesn't re-subscribe on every render
   const handlersRef = useRef({
     onToggleCheatsheet: () => setCheatsheetOpen(o => !o),
     onViewChange: (v: AppView) => { setView(v); setMobilePanelIdx(0); },
@@ -197,10 +199,17 @@ export default function App() {
 
   return (
     <div className="flex h-[100dvh] flex-col overflow-hidden bg-zinc-950 text-zinc-100">
+      {/* Skip to main content — first focusable element */}
+      <a
+        href="#main-content"
+        className="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-[100] focus:rounded focus:bg-teal-600 focus:px-3 focus:py-1.5 focus:text-xs focus:text-white"
+      >
+        Skip to main content
+      </a>
+
       <Header view={view} onViewChange={v => { setView(v); setMobilePanelIdx(0); }} />
       <DatabaseStatusBar onRequestImport={() => { setView("import"); setImportMode("db"); }} />
 
-      {/* PWA install banner — sits below the DB status bar */}
       {showInstallBanner && (
         <InstallBanner
           isIOS={isIOS}
@@ -210,7 +219,10 @@ export default function App() {
       )}
 
       {swUpdateReady && (
-        <div className="shrink-0 flex items-center justify-between gap-3 bg-teal-900/60 border-b border-teal-700 px-4 py-2 text-sm">
+        <div
+          className="shrink-0 flex items-center justify-between gap-3 bg-teal-900/60 border-b border-teal-700 px-4 py-2 text-sm"
+          role="alert"
+        >
           <span className="text-teal-200">A new version is available.</span>
           <button onClick={() => window.location.reload()} className="rounded-md bg-teal-600 px-3 py-1 text-xs font-medium hover:bg-teal-500">
             Reload
@@ -219,11 +231,12 @@ export default function App() {
       )}
 
       {view === "import" ? (
-        <main className="flex flex-1 items-start justify-center overflow-y-auto p-4 sm:p-8">
+        <main id="main-content" className="flex flex-1 items-start justify-center overflow-y-auto p-4 sm:p-8">
           <div className="w-full max-w-2xl space-y-4">
-            <div className="flex gap-2">
+            <div className="flex gap-2" role="group" aria-label="Import mode">
               {(["db", "deck"] as ImportMode[]).map((m) => (
                 <button key={m} onClick={() => setImportMode(m)}
+                  aria-pressed={importMode === m}
                   className={`rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
                     importMode === m ? "bg-teal-600 text-white" : "bg-zinc-800 text-zinc-300 hover:bg-zinc-700"
                   }`}
@@ -239,12 +252,12 @@ export default function App() {
         </main>
 
       ) : view === "compare" ? (
-        <main className="flex flex-1 overflow-hidden">
+        <main id="main-content" className="flex flex-1 overflow-hidden">
           <DeckComparePanel />
         </main>
 
       ) : !isReady ? (
-        <main className="flex flex-1 items-center justify-center">
+        <main id="main-content" className="flex flex-1 items-center justify-center">
           <div className="flex flex-col items-center gap-4 text-zinc-400">
             <svg className="h-10 w-10 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-label="Loading">
               <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
@@ -264,27 +277,33 @@ export default function App() {
               onClick={() => setDeckListOpen(o => !o)}
               className="px-3 py-2 text-xs text-zinc-500 hover:text-zinc-200 border-r border-zinc-800"
               aria-label="My decks"
+              aria-expanded={deckListOpen}
             >
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-4 w-4">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-4 w-4" aria-hidden="true">
                 <path d="M19 11H5m14 0a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-6a2 2 0 0 1 2-2m14 0V9a2 2 0 0 0-2-2M5 11V9a2 2 0 0 1 2-2m0 0V5a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v2M7 7h10" />
               </svg>
             </button>
-            {MOBILE_PANELS.map((label, i) => (
-              <button
-                key={label}
-                onClick={() => setMobilePanelIdx(i)}
-                className={`flex-1 py-2 text-xs font-medium transition-colors ${
-                  mobilePanelIdx === i
-                    ? "border-b-2 border-teal-500 text-teal-300"
-                    : "text-zinc-500 hover:text-zinc-300"
-                }`}
-              >
-                {label}
-              </button>
-            ))}
+            <div role="tablist" aria-label="Mobile panels" className="flex flex-1">
+              {MOBILE_PANELS.map((label, i) => (
+                <button
+                  key={label}
+                  role="tab"
+                  aria-selected={mobilePanelIdx === i}
+                  aria-controls={`mobile-panel-${i}`}
+                  onClick={() => setMobilePanelIdx(i)}
+                  className={`flex-1 py-2 text-xs font-medium transition-colors ${
+                    mobilePanelIdx === i
+                      ? "border-b-2 border-teal-500 text-teal-300"
+                      : "text-zinc-500 hover:text-zinc-300"
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
           </div>
 
-          <main className="flex flex-1 overflow-hidden">
+          <main id="main-content" className="flex flex-1 overflow-hidden">
             {deckListOpen && (
               <DeckListPanel onClose={() => setDeckListOpen(false)} />
             )}
@@ -294,16 +313,17 @@ export default function App() {
               className={`hidden md:grid h-full flex-1 ${ deckListOpen ? "" : "w-full" }`}
               style={{ gridTemplateColumns: "35% 40% 25%" }}
             >
-              <section className="flex flex-col overflow-hidden border-r border-zinc-800">
+              <section aria-label="Card search" className="flex flex-col overflow-hidden border-r border-zinc-800">
                 <div className="flex shrink-0 items-center gap-2 border-b border-zinc-800 px-3 py-2">
                   <button
                     onClick={() => setDeckListOpen(o => !o)}
+                    aria-expanded={deckListOpen}
+                    aria-label="Toggle deck list"
                     className={`flex items-center gap-1.5 rounded px-2 py-1 text-xs transition-colors ${
                       deckListOpen ? "bg-zinc-700 text-zinc-100" : "text-zinc-500 hover:text-zinc-200"
                     }`}
-                    aria-label="Toggle deck list"
                   >
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-3.5 w-3.5">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-3.5 w-3.5" aria-hidden="true">
                       <path d="M19 11H5m14 0a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-6a2 2 0 0 1 2-2m14 0V9a2 2 0 0 0-2-2M5 11V9a2 2 0 0 1 2-2m0 0V5a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v2M7 7h10" />
                     </svg>
                     My Decks
@@ -319,19 +339,33 @@ export default function App() {
                 </div>
                 <CardSearchPanel onCardClick={setDetailCard} />
               </section>
-              <section className="flex flex-col overflow-hidden border-r border-zinc-800">
+
+              <section aria-label="Deck editor" className="flex flex-col overflow-hidden border-r border-zinc-800">
                 <DeckPanel onCardClick={setDetailCard} />
               </section>
-              <section className="flex flex-col overflow-hidden">
+
+              <section aria-label="Analysis" className="flex flex-col overflow-hidden">
                 <RightPanel activeDeckId={activeDeckId} />
               </section>
             </div>
 
             {/* Mobile single-panel */}
             <div className="flex flex-col h-full overflow-hidden md:hidden flex-1">
-              {mobilePanelIdx === 0 && <CardSearchPanel onCardClick={setDetailCard} />}
-              {mobilePanelIdx === 1 && <DeckPanel onCardClick={setDetailCard} />}
-              {mobilePanelIdx === 2 && <RightPanel activeDeckId={activeDeckId} />}
+              {mobilePanelIdx === 0 && (
+                <section id="mobile-panel-0" role="tabpanel" aria-label="Card search" className="flex flex-col h-full">
+                  <CardSearchPanel onCardClick={setDetailCard} />
+                </section>
+              )}
+              {mobilePanelIdx === 1 && (
+                <section id="mobile-panel-1" role="tabpanel" aria-label="Deck editor" className="flex flex-col h-full">
+                  <DeckPanel onCardClick={setDetailCard} />
+                </section>
+              )}
+              {mobilePanelIdx === 2 && (
+                <section id="mobile-panel-2" role="tabpanel" aria-label="Analysis" className="flex flex-col h-full">
+                  <RightPanel activeDeckId={activeDeckId} />
+                </section>
+              )}
             </div>
           </main>
         </>
