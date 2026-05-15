@@ -12,26 +12,29 @@ import { DeckHistoryPanel } from "./DeckHistoryPanel";
 import { MetagamePanel } from "./MetagamePanel";
 import { DeckExportPanel } from "./DeckExportPanel";
 import { AdvisorPanel } from "./AdvisorPanel";
+import { ConsistencyPanel } from "./ConsistencyPanel";
 import { useDeckStore, useMainboardEntries, useSideboardEntries } from "../store/deckStore";
 import type { DeckSnapshot } from "../lib/deckHistory";
 
 type Tab =
   | "curve" | "mana" | "archetype" | "validate" | "gameplan"
-  | "bo3" | "sideboard" | "collection" | "history" | "export" | "meta" | "advisor";
+  | "bo3" | "sideboard" | "collection" | "history" | "export" | "meta" | "advisor"
+  | "consistency";
 
 const TABS: { id: Tab; label: string }[] = [
-  { id: "curve",      label: "Curve" },
-  { id: "mana",       label: "Mana" },
-  { id: "archetype",  label: "Archetype" },
-  { id: "validate",   label: "Validate" },
-  { id: "gameplan",   label: "Plan" },
-  { id: "bo3",        label: "Bo3" },
-  { id: "sideboard",  label: "Side" },
-  { id: "advisor",    label: "Advisor" },
-  { id: "collection", label: "Collect" },
-  { id: "history",    label: "History" },
-  { id: "export",     label: "Export" },
-  { id: "meta",       label: "Meta" },
+  { id: "curve",       label: "Curve" },
+  { id: "mana",        label: "Mana" },
+  { id: "consistency", label: "Odds" },
+  { id: "archetype",   label: "Archetype" },
+  { id: "validate",    label: "Validate" },
+  { id: "gameplan",    label: "Plan" },
+  { id: "bo3",         label: "Bo3" },
+  { id: "sideboard",   label: "Side" },
+  { id: "advisor",     label: "Advisor" },
+  { id: "collection",  label: "Collect" },
+  { id: "history",     label: "History" },
+  { id: "export",      label: "Export" },
+  { id: "meta",        label: "Meta" },
 ];
 
 interface Props {
@@ -99,26 +102,27 @@ export function RightPanel({ activeDeckId }: Props) {
       </div>
 
       <div className="flex-1 overflow-y-auto p-3">
-        {tab === "curve"      && <ManaCurveChart />}
-        {tab === "mana"       && <ManaBasePanel />}
-        {tab === "archetype"  && <ArchetypePanel />}
-        {tab === "validate"   && <ValidationPanel />}
-        {tab === "gameplan"   && <GamePlanSummary />}
-        {tab === "bo3"        && <Bo3Panel deckId={activeDeckId} />}
-        {tab === "sideboard"  && (
+        {tab === "curve"       && <ManaCurveChart />}
+        {tab === "mana"        && <ManaBasePanel />}
+        {tab === "consistency" && <ConsistencyPanel />}
+        {tab === "archetype"   && <ArchetypePanel />}
+        {tab === "validate"    && <ValidationPanel />}
+        {tab === "gameplan"    && <GamePlanSummary />}
+        {tab === "bo3"         && <Bo3Panel deckId={activeDeckId} />}
+        {tab === "sideboard"   && (
           <SideboardPlanPanel mainboard={mainCards} sideboard={sideCards} />
         )}
-        {tab === "advisor"    && <AdvisorPanel />}
-        {tab === "collection" && <CollectionPanel deckCards={deckCards} />}
-        {tab === "history"    && (
+        {tab === "advisor"     && <AdvisorPanel />}
+        {tab === "collection"  && <CollectionPanel deckCards={deckCards} />}
+        {tab === "history"     && (
           <DeckHistoryPanel
             deckId={activeDeckId}
             onRestore={handleRestore}
             onFork={handleFork}
           />
         )}
-        {tab === "export"     && <DeckExportPanel deck={exportDeck} />}
-        {tab === "meta"       && <MetagamePanel />}
+        {tab === "export"      && <DeckExportPanel deck={exportDeck} />}
+        {tab === "meta"        && <MetagamePanel />}
       </div>
     </div>
   );
