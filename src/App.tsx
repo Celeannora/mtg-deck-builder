@@ -7,13 +7,14 @@ import { CardDetailDrawer } from "./components/CardDetailDrawer";
 import { Header } from "./components/Header";
 import { DatabaseStatusBar } from "./components/DatabaseStatusBar";
 import { DeckImportPanel } from "./components/DeckImportPanel";
+import { DeckComparePanel } from "./components/DeckComparePanel";
 import { useDBStatus } from "./hooks/useDBStatus";
 import { useDeckStore } from "./store/deckStore";
 import { decodeShareableLink } from "./lib/deckExporter";
 import type { CardRecord } from "./lib/types";
 import type { DeckImportResult } from "./lib/deckParser";
 
-export type AppView = "builder" | "import";
+export type AppView = "builder" | "compare" | "import";
 export type ImportMode = "db" | "deck";
 
 export default function App() {
@@ -21,19 +22,18 @@ export default function App() {
   const [importMode, setImportMode] = useState<ImportMode>("db");
   const [detailCard, setDetailCard] = useState<CardRecord | null>(null);
   const [swUpdateReady, setSwUpdateReady] = useState(false);
+  const [mobilePanelIdx, setMobilePanelIdx] = useState(0);
 
   const { isReady, refresh } = useDBStatus();
   const activeDeckId         = useDeckStore(s => s.activeDeckId);
   const loadFromSnapshot     = useDeckStore(s => s.loadFromSnapshot);
   const addCard              = useDeckStore(s => s.addCard);
 
-  // Decode shareable link on mount
   useEffect(() => {
     const decoded = decodeShareableLink(window.location.hash);
     if (decoded) loadFromSnapshot(decoded);
   }, []);
 
-  // SW update banner
   useEffect(() => {
     const handler = () => setSwUpdateReady(true);
     window.addEventListener("sw-update-ready", handler);
@@ -48,9 +48,12 @@ export default function App() {
     setView("builder");
   };
 
+  // Mobile panel labels for the 3-column builder layout
+  const mobilePanels = ["Search", "Deck", "Analysis"];
+
   return (
-    <div className="flex h-screen flex-col overflow-hidden bg-zinc-950 text-zinc-100">
-      <Header view={view} onViewChange={setView} />
+    <div className="flex h-[100dvh] flex-col overflow-hidden bg-zinc-950 text-zinc-100">
+      <Header view={view} onViewChange={v => { setView(v); setMobilePanelIdx(0); }} />
       <DatabaseStatusBar onRequestImport={() => { setView("import"); setImportMode("db"); }} />
 
       {swUpdateReady && (
@@ -66,7 +69,7 @@ export default function App() {
       )}
 
       {view === "import" ? (
-        <main className="flex flex-1 items-start justify-center overflow-y-auto p-8">
+        <main className="flex flex-1 items-start justify-center overflow-y-auto p-4 sm:p-8">
           <div className="w-full max-w-2xl space-y-4">
             <div className="flex gap-2">
               {(["db", "deck"] as ImportMode[]).map((m) => (
@@ -83,7 +86,6 @@ export default function App() {
                 </button>
               ))}
             </div>
-
             {importMode === "db" ? (
               <BulkImporter onImportDone={() => { refresh(); setView("builder"); }} />
             ) : (
@@ -91,43 +93,70 @@ export default function App() {
             )}
           </div>
         </main>
+
+      ) : view === "compare" ? (
+        <main className="flex flex-1 overflow-hidden">
+          <DeckComparePanel />
+        </main>
+
       ) : !isReady ? (
         <main className="flex flex-1 items-center justify-center">
           <div className="flex flex-col items-center gap-4 text-zinc-400">
-            <svg
-              className="h-10 w-10 animate-spin"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              aria-label="Loading"
-            >
+            <svg className="h-10 w-10 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-label="Loading">
               <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
             </svg>
             <p className="text-sm">No card data found.</p>
-            <button
-              onClick={() => setView("import")}
-              className="mt-2 rounded-lg bg-teal-600 px-5 py-2.5 text-sm font-medium hover:bg-teal-500 transition-colors"
-            >
+            <button onClick={() => setView("import")} className="mt-2 rounded-lg bg-teal-600 px-5 py-2.5 text-sm font-medium hover:bg-teal-500 transition-colors">
               Import Card Database
             </button>
           </div>
         </main>
+
       ) : (
-        <main
-          className="grid flex-1 overflow-hidden"
-          style={{ gridTemplateColumns: "35% 40% 25%" }}
-        >
-          <section className="flex flex-col overflow-hidden border-r border-zinc-800">
-            <CardSearchPanel onCardClick={setDetailCard} />
-          </section>
-          <section className="flex flex-col overflow-hidden border-r border-zinc-800">
-            <DeckPanel onCardClick={setDetailCard} />
-          </section>
-          <section className="flex flex-col overflow-hidden">
-            <RightPanel activeDeckId={activeDeckId} />
-          </section>
-        </main>
+        <>
+          {/* ── Mobile panel switcher tabs (hidden on md+) ── */}
+          <div className="flex shrink-0 border-b border-zinc-800 md:hidden">
+            {mobilePanels.map((label, i) => (
+              <button
+                key={label}
+                onClick={() => setMobilePanelIdx(i)}
+                className={`flex-1 py-2 text-xs font-medium transition-colors ${
+                  mobilePanelIdx === i
+                    ? "border-b-2 border-teal-500 text-teal-300"
+                    : "text-zinc-500 hover:text-zinc-300"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
+          {/* ── Main builder layout ── */}
+          <main className="flex-1 overflow-hidden">
+            {/* Desktop: fixed 3-column grid */}
+            <div
+              className="hidden md:grid h-full"
+              style={{ gridTemplateColumns: "35% 40% 25%" }}
+            >
+              <section className="flex flex-col overflow-hidden border-r border-zinc-800">
+                <CardSearchPanel onCardClick={setDetailCard} />
+              </section>
+              <section className="flex flex-col overflow-hidden border-r border-zinc-800">
+                <DeckPanel onCardClick={setDetailCard} />
+              </section>
+              <section className="flex flex-col overflow-hidden">
+                <RightPanel activeDeckId={activeDeckId} />
+              </section>
+            </div>
+
+            {/* Mobile: single-panel view controlled by tab */}
+            <div className="flex flex-col h-full overflow-hidden md:hidden">
+              {mobilePanelIdx === 0 && <CardSearchPanel onCardClick={setDetailCard} />}
+              {mobilePanelIdx === 1 && <DeckPanel onCardClick={setDetailCard} />}
+              {mobilePanelIdx === 2 && <RightPanel activeDeckId={activeDeckId} />}
+            </div>
+          </main>
+        </>
       )}
 
       {detailCard && (
