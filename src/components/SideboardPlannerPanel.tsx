@@ -1,3 +1,4 @@
-// Orphaned draft — superseded by SideboardPlanPanel.tsx which is mounted in RightPanel.
-// Kept as empty re-export to avoid breaking any stale imports during transition.
+// This file is intentionally a no-op re-export.
+// The active sideboard planner is SideboardPlanPanel.tsx, mounted via RightPanel.
+// Do not add logic here — edit SideboardPlanPanel.tsx instead.
 export {};

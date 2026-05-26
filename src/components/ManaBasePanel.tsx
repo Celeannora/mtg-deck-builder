@@ -1,13 +1,5 @@
-import { useMemo } from "react";
-import { useLiveQuery } from "dexie-react-hooks";
-import { db } from "../lib/db";
-import {
-  recommendLandCount,
-  recommendColorSources,
-  recommendDualLands,
-  buildManaCurve,
-  computeCastabilityWarnings,
-} from "../lib/manaBase";
+import { useEffect } from "react";
+import { useManaBaseStore } from "../lib/manaBaseStore";
 import { useDeckStore } from "../lib/deckStore";
 import type { DeckEntry } from "../lib/legality";
 
@@ -21,45 +13,25 @@ const COLOR_BG: Record<string, string> = {
   R: "bg-red-100 text-red-900",
   G: "bg-green-100 text-green-900",
 };
+const ARCHETYPE_COLOR: Record<string, string> = {
+  aggro:    "bg-red-900/60 text-red-300 border-red-800",
+  midrange: "bg-teal-900/60 text-teal-300 border-teal-800",
+  control:  "bg-blue-900/60 text-blue-300 border-blue-800",
+  combo:    "bg-purple-900/60 text-purple-300 border-purple-800",
+  ramp:     "bg-green-900/60 text-green-300 border-green-800",
+};
 
 export function ManaBasePanel() {
   const entries = useDeckStore(s => s.entries) as DeckEntry[];
-  const allCards = useLiveQuery(() => db.cards.toArray(), []) ?? [];
+  const { analysis, loading, compute } = useManaBaseStore();
 
-  const mainboard = useMemo(
-    () => entries.filter(e => e.zone === "main"),
-    [entries]
-  );
+  const mainboard = entries.filter(e => e.zone === "main");
 
-  const landRec = useMemo(() => recommendLandCount(mainboard), [mainboard]);
-
-  const activeColors = useMemo(() => {
-    const colorSources = recommendColorSources(mainboard, landRec.recommended);
-    return colorSources.map(c => c.color);
-  }, [mainboard, landRec.recommended]);
-
-  const colorSources = useMemo(
-    () => recommendColorSources(mainboard, landRec.recommended),
-    [mainboard, landRec.recommended]
-  );
-
-  const duals = useMemo(
-    () => recommendDualLands(allCards, activeColors, landRec.recommended),
-    [allCards, activeColors, landRec.recommended]
-  );
-
-  const curve = useMemo(() => buildManaCurve(mainboard), [mainboard]);
-  const maxCurve = Math.max(...curve.map(s => s.total), 1);
-
-  const deckSize = mainboard.reduce((s, e) => s + e.quantity, 0);
-  const castabilityWarnings = useMemo(
-    () => computeCastabilityWarnings(mainboard, deckSize),
-    [mainboard, deckSize]
-  );
-
-  const currentLands = mainboard
-    .filter(e => e.card.typeLine.includes("Land"))
-    .reduce((s, e) => s + e.quantity, 0);
+  // Re-compute whenever mainboard changes
+  useEffect(() => {
+    if (mainboard.length > 0) compute(mainboard);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mainboard.map(e => `${e.card.id}:${e.quantity}`).join(",")]);
 
   if (mainboard.length === 0) {
     return (
@@ -69,8 +41,49 @@ export function ManaBasePanel() {
     );
   }
 
+  if (loading || !analysis) {
+    return (
+      <div className="flex flex-col items-center justify-center py-16 text-zinc-500 text-sm">
+        <p>Analyzing mana base…</p>
+      </div>
+    );
+  }
+
+  const {
+    landRec, colorSources, dualSuggestions, curve,
+    castabilityWarnings, detectedArchetype, archetypeConfidence,
+  } = analysis;
+
+  const maxCurve = Math.max(...curve.map(s => s.total), 1);
+  const currentLands = mainboard
+    .filter(e => e.card.typeLine.includes("Land"))
+    .reduce((s, e) => s + e.quantity, 0);
+
+  const archetypeKey = detectedArchetype.toLowerCase();
+  const archetypeBadgeClass = ARCHETYPE_COLOR[archetypeKey] ?? "bg-zinc-800 text-zinc-300 border-zinc-700";
+  const confidencePct = Math.round(archetypeConfidence * 100);
+
   return (
     <div className="space-y-6 text-sm">
+
+      {/* Detected archetype */}
+      <section className="flex items-center gap-3">
+        <span className={`rounded-full border px-3 py-1 text-xs font-semibold capitalize ${archetypeBadgeClass}`}>
+          {detectedArchetype}
+        </span>
+        <span className="text-zinc-500 text-xs">
+          {confidencePct}% confidence
+        </span>
+        <div
+          className="flex-1 h-1.5 bg-zinc-800 rounded-full overflow-hidden"
+          title={`Archetype confidence: ${confidencePct}%`}
+        >
+          <div
+            className="h-full bg-teal-500 rounded-full transition-all"
+            style={{ width: `${confidencePct}%` }}
+          />
+        </div>
+      </section>
 
       {/* Land count */}
       <section>
@@ -97,9 +110,7 @@ export function ManaBasePanel() {
         )}
         {landRec.adjustments.length > 0 && (
           <ul className="mt-2 space-y-0.5 text-zinc-500">
-            {landRec.adjustments.map((adj, i) => (
-              <li key={i}>{adj}</li>
-            ))}
+            {landRec.adjustments.map((adj, i) => <li key={i}>{adj}</li>)}
           </ul>
         )}
       </section>
@@ -125,9 +136,7 @@ export function ManaBasePanel() {
                 </div>
                 <span className="text-zinc-400 w-28 text-right">
                   {cs.recommendedSources} sources
-                  {cs.criticallyUndersourced && (
-                    <span className="ml-1 text-red-400">⚠</span>
-                  )}
+                  {cs.criticallyUndersourced && <span className="ml-1 text-red-400">⚠</span>}
                 </span>
               </div>
             ))}
@@ -160,11 +169,11 @@ export function ManaBasePanel() {
       </section>
 
       {/* Dual land suggestions */}
-      {duals.length > 0 && (
+      {dualSuggestions.length > 0 && (
         <section>
           <h3 className="font-semibold text-zinc-200 mb-2">Suggested Dual Lands</h3>
           <div className="space-y-1.5">
-            {duals.slice(0, 8).map(d => (
+            {dualSuggestions.slice(0, 8).map(d => (
               <div
                 key={d.card.id}
                 className="flex items-center justify-between rounded-md bg-zinc-800 px-3 py-1.5"
