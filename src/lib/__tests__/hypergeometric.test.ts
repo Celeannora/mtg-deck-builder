@@ -1,102 +1,127 @@
 import { describe, it, expect } from 'vitest';
 import {
-  hypergeometric,
-  probabilityOfDrawingAtLeast,
-  probabilityOfDrawingExactly,
-  landProbabilityTable,
+  hypergeometricPMF,
+  hypergeometricCDF,
+  probAtLeastOne,
+  probByTurn,
+  castabilityByTurn,
 } from '../hypergeometric';
 
-describe('hypergeometric core', () => {
-  it('returns 1 when drawing entire population', () => {
-    // Drawing all 60 cards from 60-card deck — probability of any card = 1
-    const p = hypergeometric({ populationSize: 60, successesInPop: 4, sampleSize: 60, desiredSuccesses: 1 });
-    expect(p).toBeCloseTo(1, 5);
-  });
-
+describe('hypergeometricPMF', () => {
   it('returns 0 when desired successes exceed successes in population', () => {
-    const p = hypergeometric({ populationSize: 60, successesInPop: 2, sampleSize: 7, desiredSuccesses: 3 });
-    expect(p).toBe(0);
+    expect(hypergeometricPMF(60, 2, 7, 3)).toBe(0);
   });
 
-  it('returns 0 when sample size is 0', () => {
-    const p = hypergeometric({ populationSize: 60, successesInPop: 4, sampleSize: 0, desiredSuccesses: 1 });
-    expect(p).toBe(0);
+  it('returns 0 when sample size is 0 and k > 0', () => {
+    expect(hypergeometricPMF(60, 4, 0, 1)).toBe(0);
   });
 
-  it('computes known opening-hand probability for 4-of in 60-card deck', () => {
-    // Drawing 7 cards, 4 copies of a card in 60-card deck
-    // P(at least 1) ≈ 0.3966 is a well-known MTG figure
-    const p = probabilityOfDrawingAtLeast({
-      populationSize: 60,
-      successesInPop: 4,
-      sampleSize: 7,
-      desiredSuccesses: 1,
-    });
+  it('returns 1 when drawing all cards and k equals total successes', () => {
+    // P(X = 4 | N=60, K=4, n=60) = 1
+    expect(hypergeometricPMF(60, 4, 60, 4)).toBeCloseTo(1, 5);
+  });
+
+  it('probabilities sum to 1 across all possible k', () => {
+    const N = 20, K = 6, n = 5;
+    let total = 0;
+    for (let k = 0; k <= Math.min(K, n); k++) {
+      total += hypergeometricPMF(N, K, n, k);
+    }
+    expect(total).toBeCloseTo(1, 5);
+  });
+
+  it('handles k=0 (probability of drawing zero copies)', () => {
+    const p = hypergeometricPMF(60, 4, 7, 0);
+    expect(p).toBeGreaterThan(0);
+    expect(p).toBeLessThan(1);
+  });
+});
+
+describe('hypergeometricCDF (at-least)', () => {
+  it('returns 1 when minK=0', () => {
+    expect(hypergeometricCDF(60, 4, 7, 0)).toBeCloseTo(1, 5);
+  });
+
+  it('returns 0 when minK exceeds successes in population', () => {
+    expect(hypergeometricCDF(60, 2, 7, 3)).toBe(0);
+  });
+
+  it('PMF and CDF are consistent: P(X>=1) + P(X=0) ≈ 1', () => {
+    const atLeast1 = hypergeometricCDF(60, 4, 7, 1);
+    const exactly0 = hypergeometricPMF(60, 4, 7, 0);
+    expect(atLeast1 + exactly0).toBeCloseTo(1, 5);
+  });
+});
+
+describe('probAtLeastOne', () => {
+  it('returns ~0.397 for 4-of in 60-card deck, 7-card hand', () => {
+    // Well-known MTG figure
+    const p = probAtLeastOne(60, 4, 7);
     expect(p).toBeGreaterThan(0.39);
     expect(p).toBeLessThan(0.41);
   });
 
-  it('at-least and exactly are consistent for k=0', () => {
-    const params = { populationSize: 60, successesInPop: 4, sampleSize: 7, desiredSuccesses: 0 };
-    const exactly = probabilityOfDrawingExactly(params);
-    const atLeast = probabilityOfDrawingAtLeast({ ...params, desiredSuccesses: 1 });
-    expect(exactly + atLeast).toBeCloseTo(1, 5);
+  it('returns 0 for 0 copies', () => {
+    expect(probAtLeastOne(60, 0, 7)).toBe(0);
   });
 
-  it('probabilities sum to 1 across all possible k', () => {
-    const pop = 20, succ = 6, sample = 5;
-    let total = 0;
-    for (let k = 0; k <= Math.min(succ, sample); k++) {
-      total += probabilityOfDrawingExactly({
-        populationSize: pop,
-        successesInPop: succ,
-        sampleSize: sample,
-        desiredSuccesses: k,
-      });
-    }
-    expect(total).toBeCloseTo(1, 5);
+  it('returns 1 when copies equals deck size', () => {
+    expect(probAtLeastOne(4, 4, 4)).toBeCloseTo(1, 5);
   });
 });
 
-describe('hypergeometric edge cases', () => {
-  it('handles a 1-card population', () => {
-    const p = probabilityOfDrawingAtLeast({ populationSize: 1, successesInPop: 1, sampleSize: 1, desiredSuccesses: 1 });
-    expect(p).toBeCloseTo(1, 5);
+describe('probByTurn', () => {
+  it('probability increases with more turns', () => {
+    const p1 = probByTurn(60, 4, 1, true);
+    const p5 = probByTurn(60, 4, 5, true);
+    expect(p5).toBeGreaterThan(p1);
   });
 
-  it('returns 0 when no successes in population', () => {
-    const p = probabilityOfDrawingAtLeast({ populationSize: 60, successesInPop: 0, sampleSize: 7, desiredSuccesses: 1 });
-    expect(p).toBe(0);
+  it('on-draw has higher probability than on-play same turn', () => {
+    const onDraw = probByTurn(60, 4, 3, true);
+    const onPlay = probByTurn(60, 4, 3, false);
+    expect(onDraw).toBeGreaterThan(onPlay);
   });
 
-  it('desiredSuccesses 0 always returns non-zero probability', () => {
-    const p = probabilityOfDrawingExactly({ populationSize: 60, successesInPop: 4, sampleSize: 7, desiredSuccesses: 0 });
-    expect(p).toBeGreaterThan(0);
+  it('returns a value between 0 and 1', () => {
+    const p = probByTurn(60, 4, 4, true);
+    expect(p).toBeGreaterThanOrEqual(0);
+    expect(p).toBeLessThanOrEqual(1);
   });
 });
 
-describe('landProbabilityTable', () => {
-  it('returns a table with entries for each land count', () => {
-    const table = landProbabilityTable({ deckSize: 60, sampleSize: 7 });
-    expect(Array.isArray(table)).toBe(true);
-    expect(table.length).toBeGreaterThan(0);
+describe('castabilityByTurn', () => {
+  it('returns an array of length equal to turns parameter', () => {
+    const result = castabilityByTurn(60, 4, 3, 24, 8, true);
+    expect(result).toHaveLength(8);
   });
 
-  it('each entry has landCount and probability fields', () => {
-    const table = landProbabilityTable({ deckSize: 60, sampleSize: 7 });
-    for (const row of table) {
-      expect(typeof row.landCount).toBe('number');
-      expect(typeof row.probability).toBe('number');
-      expect(row.probability).toBeGreaterThanOrEqual(0);
-      expect(row.probability).toBeLessThanOrEqual(1);
+  it('each entry has the correct shape', () => {
+    const result = castabilityByTurn(60, 4, 3, 24, 4, true);
+    for (const entry of result) {
+      expect(typeof entry.turn).toBe('number');
+      expect(typeof entry.probDrawn).toBe('number');
+      expect(typeof entry.probMana).toBe('number');
+      expect(typeof entry.probCastable).toBe('number');
     }
   });
 
-  it('probability peaks somewhere in the 2–3 land range for 24 lands / 7 cards', () => {
-    const table = landProbabilityTable({ deckSize: 60, sampleSize: 7, landCount: 24 });
-    const peak = table.reduce((best, row) =>
-      row.probability > best.probability ? row : best, table[0]);
-    expect(peak.landCount).toBeGreaterThanOrEqual(2);
-    expect(peak.landCount).toBeLessThanOrEqual(3);
+  it('turn numbers are sequential starting at 1', () => {
+    const result = castabilityByTurn(60, 4, 2, 24, 5, true);
+    for (let i = 0; i < result.length; i++) {
+      expect(result[i].turn).toBe(i + 1);
+    }
+  });
+
+  it('cmc=0 card has probMana=1 on every turn', () => {
+    const result = castabilityByTurn(60, 4, 0, 24, 4, true);
+    for (const entry of result) {
+      expect(entry.probMana).toBeCloseTo(1, 5);
+    }
+  });
+
+  it('castability improves as turns increase', () => {
+    const result = castabilityByTurn(60, 4, 3, 24, 8, true);
+    expect(result[7].probCastable).toBeGreaterThan(result[0].probCastable);
   });
 });

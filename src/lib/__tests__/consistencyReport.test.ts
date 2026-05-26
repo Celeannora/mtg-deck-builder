@@ -1,117 +1,128 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import {
-  generateConsistencyReport,
-  scoreConsistency,
-  ConsistencyReport,
-} from '../consistencyReport';
+import { describe, it, expect } from 'vitest';
+import { buildConsistencyReport } from '../consistencyReport';
+import type { DeckEntry, ConsistencyReport } from '../consistencyReport';
 
-// Minimal card factory
-const makeCard = (overrides: Record<string, unknown> = {}) => ({
-  id: `card-${Math.random()}`,
-  name: 'Test Card',
-  type_line: 'Instant',
-  mana_cost: '{2}{U}',
-  cmc: 3,
-  colors: ['U'],
-  color_identity: ['U'],
-  oracle_text: '',
-  ...overrides,
-});
-
-const makeLand = (overrides: Record<string, unknown> = {}) =>
-  makeCard({
-    name: 'Island',
-    type_line: 'Basic Land — Island',
-    mana_cost: '',
+function makeLandEntry(overrides: Partial<DeckEntry> = {}): DeckEntry {
+  return {
+    name: 'Plains',
+    quantity: 1,
     cmc: 0,
-    oracle_text: '{T}: Add {U}.',
+    manaCost: null,
+    typeLine: 'Basic Land — Plains',
+    producedManaJson: '["W"]',
     ...overrides,
-  });
-
-function buildDeck(landCount = 24, spellCount = 36) {
-  const entries = [
-    ...Array.from({ length: landCount }, () => ({ card: makeLand(), quantity: 1 })),
-    ...Array.from({ length: spellCount }, (_, i) => ({
-      card: makeCard({ cmc: (i % 5) + 1 }),
-      quantity: 1,
-    })),
-  ];
-  return entries;
+  };
 }
 
-describe('generateConsistencyReport', () => {
-  it('returns a report object with required fields', () => {
-    const deck = buildDeck();
-    const report: ConsistencyReport = generateConsistencyReport(deck);
-    expect(report).toHaveProperty('landRatio');
-    expect(report).toHaveProperty('avgCmc');
-    expect(report).toHaveProperty('consistencyScore');
-    expect(report).toHaveProperty('warnings');
-    expect(Array.isArray(report.warnings)).toBe(true);
+function makeSpellEntry(cmc: number, overrides: Partial<DeckEntry> = {}): DeckEntry {
+  return {
+    name: `Spell${cmc}`,
+    quantity: 1,
+    cmc,
+    manaCost: `{${'W'.repeat(cmc)}}`,
+    typeLine: 'Instant',
+    ...overrides,
+  };
+}
+
+function buildDeckEntries(landCount = 24, spellCount = 36): DeckEntry[] {
+  return [
+    ...Array.from({ length: landCount }, () => makeLandEntry()),
+    ...Array.from({ length: spellCount }, (_, i) => makeSpellEntry((i % 5) + 1)),
+  ];
+}
+
+describe('buildConsistencyReport — shape', () => {
+  it('returns a report with all required top-level fields', () => {
+    const deck = buildDeckEntries();
+    const report: ConsistencyReport = buildConsistencyReport(deck, 100);
+    expect(typeof report.deckSize).toBe('number');
+    expect(typeof report.landCount).toBe('number');
+    expect(typeof report.nonLandCount).toBe('number');
+    expect(typeof report.avgManaValue).toBe('number');
+    expect(typeof report.grade).toBe('string');
+    expect(typeof report.summary).toBe('string');
+    expect(Array.isArray(report.castabilityRows)).toBe(true);
+    expect(Array.isArray(report.flaggedCards)).toBe(true);
+    expect(Array.isArray(report.manaWarnings)).toBe(true);
+    expect(report.handStats).toBeDefined();
   });
 
-  it('land ratio is between 0 and 1', () => {
-    const deck = buildDeck();
-    const report = generateConsistencyReport(deck);
-    expect(report.landRatio).toBeGreaterThan(0);
-    expect(report.landRatio).toBeLessThanOrEqual(1);
+  it('deckSize = landCount + nonLandCount', () => {
+    const deck = buildDeckEntries(24, 36);
+    const report = buildConsistencyReport(deck, 100);
+    expect(report.deckSize).toBe(60);
+    expect(report.landCount).toBe(24);
+    expect(report.nonLandCount).toBe(36);
   });
 
-  it('warns when land count is too low', () => {
-    const deck = buildDeck(10, 50);
-    const report = generateConsistencyReport(deck);
-    const hasLandWarning = report.warnings.some((w: string) =>
-      w.toLowerCase().includes('land'));
-    expect(hasLandWarning).toBe(true);
+  it('grade is one of A B C D F', () => {
+    const deck = buildDeckEntries();
+    const report = buildConsistencyReport(deck, 100);
+    expect(['A', 'B', 'C', 'D', 'F']).toContain(report.grade);
   });
 
-  it('warns when land count is too high', () => {
-    const deck = buildDeck(40, 20);
-    const report = generateConsistencyReport(deck);
-    const hasLandWarning = report.warnings.some((w: string) =>
-      w.toLowerCase().includes('land'));
-    expect(hasLandWarning).toBe(true);
+  it('castabilityRows are sorted by cmc ascending', () => {
+    const deck = buildDeckEntries();
+    const report = buildConsistencyReport(deck, 100);
+    for (let i = 1; i < report.castabilityRows.length; i++) {
+      expect(report.castabilityRows[i].cmc).toBeGreaterThanOrEqual(
+        report.castabilityRows[i - 1].cmc
+      );
+    }
   });
 
-  it('produces no warnings for a balanced deck', () => {
-    const deck = buildDeck(24, 36);
-    const report = generateConsistencyReport(deck);
-    expect(report.warnings.length).toBe(0);
-  });
-
-  it('avgCmc reflects the cards in the deck', () => {
-    // All spells at cmc 2
-    const deck = [
-      ...Array.from({ length: 24 }, () => ({ card: makeLand(), quantity: 1 })),
-      ...Array.from({ length: 36 }, () => ({ card: makeCard({ cmc: 2 }), quantity: 1 })),
-    ];
-    const report = generateConsistencyReport(deck);
-    // Avg cmc of non-land cards should be exactly 2
-    expect(report.avgCmc).toBeCloseTo(2, 1);
+  it('flaggedCards is a subset of castabilityRows', () => {
+    const deck = buildDeckEntries();
+    const report = buildConsistencyReport(deck, 100);
+    for (const flagged of report.flaggedCards) {
+      expect(report.castabilityRows.some(r => r.cardName === flagged.cardName)).toBe(true);
+    }
   });
 });
 
-describe('scoreConsistency', () => {
-  it('returns a number between 0 and 100', () => {
-    const deck = buildDeck();
-    const score = scoreConsistency(deck);
-    expect(score).toBeGreaterThanOrEqual(0);
-    expect(score).toBeLessThanOrEqual(100);
+describe('buildConsistencyReport — land counts', () => {
+  it('warns (via flaggedCards or manaWarnings) for a severely mana-light deck', () => {
+    // 10 lands / 50 spells — should not produce a perfect grade
+    const deck = buildDeckEntries(10, 50);
+    const report = buildConsistencyReport(deck, 200);
+    const hasIssue =
+      report.flaggedCards.length > 0 ||
+      report.manaWarnings.length > 0 ||
+      ['D', 'F'].includes(report.grade);
+    expect(hasIssue).toBe(true);
   });
 
-  it('a balanced deck scores higher than a mana-flooded one', () => {
-    const balanced = buildDeck(24, 36);
-    const flooded = buildDeck(40, 20);
-    expect(scoreConsistency(balanced)).toBeGreaterThan(scoreConsistency(flooded));
+  it('a balanced deck (24 lands) scores A or B', () => {
+    const deck = buildDeckEntries(24, 36);
+    const report = buildConsistencyReport(deck, 500);
+    expect(['A', 'B']).toContain(report.grade);
+  });
+});
+
+describe('buildConsistencyReport — handStats', () => {
+  it('handStats.keepRate is between 0 and 1', () => {
+    const deck = buildDeckEntries();
+    const report = buildConsistencyReport(deck, 200);
+    expect(report.handStats.keepRate).toBeGreaterThanOrEqual(0);
+    expect(report.handStats.keepRate).toBeLessThanOrEqual(1);
   });
 
-  it('a balanced deck scores higher than a mana-starved one', () => {
-    const balanced = buildDeck(24, 36);
-    const starved = buildDeck(10, 50);
-    expect(scoreConsistency(balanced)).toBeGreaterThan(scoreConsistency(starved));
+  it('handStats.trials matches the passed-in trials count', () => {
+    const deck = buildDeckEntries();
+    const report = buildConsistencyReport(deck, 123);
+    expect(report.handStats.trials).toBe(123);
+  });
+});
+
+describe('buildConsistencyReport — edge cases', () => {
+  it('does not throw for a very small deck (20 cards)', () => {
+    const deck = buildDeckEntries(8, 12);
+    expect(() => buildConsistencyReport(deck, 50)).not.toThrow();
   });
 
-  it('does not throw for an empty deck', () => {
-    expect(() => scoreConsistency([])).not.toThrow();
+  it('does not throw for a land-only deck', () => {
+    const deck = Array.from({ length: 60 }, () => makeLandEntry());
+    expect(() => buildConsistencyReport(deck, 50)).not.toThrow();
   });
 });
