@@ -1,4 +1,4 @@
-# Python
+# Python (legacy — kept for history)
 __pycache__/
 *.py[cod]
 *.pyo
@@ -6,8 +6,15 @@ __pycache__/
 .venv/
 venv/
 *.egg-info/
+
+# Node
+node_modules/
+
+# Build output
 dist/
+dist-electron/
 build/
+release/
 
 # App data
 data/
@@ -23,3 +30,7 @@ Thumbs.db
 .vscode/
 .idea/
 *.swp
+
+# Electron builder cache
+.cache/
+out/
