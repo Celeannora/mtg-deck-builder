@@ -1,178 +1,100 @@
-# MTG Standard Deck Builder
+# MTG Deck Builder
 
-A fully local, offline-capable Standard deck builder built on React + TypeScript + Dexie (IndexedDB).  
-Card data sourced from [Scryfall bulk data](https://scryfall.com/docs/api/bulk-data). Images © Wizards of the Coast.
+A local-first, offline-capable Magic: The Gathering deck builder built with React, TypeScript, Vite, Dexie (IndexedDB), and Zustand.
 
-> **Development status:** Active  
-> **Rule:** Every commit that changes code must also update this file.
+## Features
 
----
+- **Card database** — full Scryfall bulk import (~300k cards) stored in IndexedDB via a Web Worker; no server required
+- **Deck builder** — search, filter, add/remove cards with quantity tracking and 4-copy enforcement
+- **Mana base analysis** — auto-detects archetype, recommends land count, color sources, and dual lands
+- **Curve analysis** — mana curve visualization with archetype-specific curve profiles
+- **Legality checker** — validates deck against Standard, Pioneer, Modern, Legacy, Vintage, Commander, Pauper
+- **Rotation warnings** — flags cards within 90 days of Standard rotation
+- **AI assistant (Phase 6)** — suggestions, synergy scoring, combo detection, budget optimization, role assignment, trend analysis, what's missing analysis
+- **Export** — Arena, MTGO, and plain-text formats
+- **Collection tracker** — separate IndexedDB table for owned cards
+- **PWA** — service worker registered; installable as desktop/mobile app
 
 ## Quick Start
 
 ```bash
+# 1. Clone
+git clone https://github.com/Celeannora/mtg-deck-builder.git
+cd mtg-deck-builder
+
+# 2. Install
 npm install
+
+# 3. Dev server (http://localhost:5173)
 npm run dev
 ```
 
-On first load you will be prompted to import card data. Either:
-- Choose a local `oracle_cards.json` from [Scryfall Bulk Data](https://scryfall.com/docs/api/bulk-data), or
-- Click **"Download from Scryfall"** to fetch the latest dump directly (~150 MB)
+On first load the app will prompt you to import the Scryfall bulk data (~300 MB download, stored locally). This is a one-time setup.
 
-The import runs in a Web Worker — the UI stays responsive during the ~300k card parse.  
-All data is stored in IndexedDB (Dexie). No server required.
+## Scripts
 
----
-
-## Phase Status
-
-> Last updated: 2026-05-13. Reflects what is **actually committed and verified**.
-
-| Phase | Description | Status | Notes |
-|---|---|---|---|
-| 1 | Data Foundation | ✅ Complete | Import, search, DB, status bar |
-| 2 | Format Legality Engine | ✅ Complete | legality, companion, rotation, deckStore, ValidationPanel, legality.test.ts |
-| 3 | Mana Base Calculator | ✅ Complete | manaBase, manaBaseStore, ManaBasePanel, ManaCurveChart |
-| 4 | Archetype Engine | ✅ Complete | archetype, roles, deckComposition, ArchetypePanel |
-| 5 | 3-Panel UI Shell | ✅ Complete | CardSearchPanel, DeckPanel, DeckStatsBar, RightPanel, CardDetailDrawer |
-| 6 | AI Construction Assistant | ⚠️ Partial | Files committed, unaudited |
-| 7 | Metagame Engine | ⬜ Planned | — |
-| 8 | Import / Export | ⬜ Planned | — |
-| 9 | Bo3 Competitive Mode | ⬜ Planned | — |
-| 10 | Tests + CI | ⚠️ Partial | legality.test.ts ✅, remainder pending |
-| 11 | Competitive Intelligence | ⬜ Planned | — |
-| 12 | Final Integration + PWA | ⬜ Planned | — |
-
----
-
-## Bug Fixes (this commit)
-
-| File | Bug | Fix |
-|---|---|---|
-| `DeckPanel.tsx` | `validation.issues` / `DeckCard` don't exist | Use `validation.violations` + `DeckEntry` |
-| `DeckStatsBar.tsx` | Read dead props from deckStore | Rewritten to read `entries` + `useManaBaseStore` |
-| `ArchetypePanel.tsx` | Import `analyzeDeckComposition` from wrong module | Import from `deckComposition` only |
-| `ManaCurveChart.tsx` | Required props crash when called bare from RightPanel | Props now optional; falls back to stores |
-| `CardSearchPanel.tsx` | `addCard(card)` missing board arg | Fixed to `addCard(card, "main")` |
-| `deckComposition.ts` | `trafficLight` `||` → `&&` (every value passed yellow) | Fixed |
-
----
-
-## Phase 1 — Data Foundation (✅ Complete)
-
-| File | Purpose |
+| Command | What it does |
 |---|---|
-| `src/lib/types.ts` | All TypeScript interfaces |
-| `src/lib/db.ts` | Dexie v3 schema + CRUD + deck versioning |
-| `src/lib/scryfall.ts` | Eligibility filter + card/set transformer |
-| `src/lib/scryfallApi.ts` | Bulk-data API discovery |
-| `src/lib/search.ts` | Card filter/sort/paginate engine |
-| `src/workers/importWorker.ts` | Web Worker: file + network import |
-| `src/components/BulkImporter.tsx` | Import UI (file + network mode) |
-| `src/components/DatabaseStatusBar.tsx` | Persistent status bar |
-| `src/components/Header.tsx` | App header + nav |
-| `src/hooks/useDBStatus.ts` | Reactive DB status hook |
-| `src/App.tsx` | Root component |
+| `npm run dev` | Start Vite dev server on port 5173 |
+| `npm run build` | TypeScript compile + Vite production build |
+| `npm run preview` | Serve the production build locally |
+| `npm run typecheck` | Run `tsc --noEmit` (no emit, type errors only) |
+| `npm run lint` | ESLint with zero warnings allowed |
+| `npm test` | Run all Vitest tests (single run) |
+| `npm run test:watch` | Vitest in watch mode |
+| `npm run test:coverage` | Coverage report via v8 |
+| `npm run test:ui` | Vitest browser UI |
 
----
+## Deploy to Vercel
 
-## Phase 2 — Format Legality Engine (✅ Complete)
+### One-time setup
 
-| File | Purpose |
-|---|---|
-| `src/lib/legality.ts` | Standard rules: MIN_60, COPY_LIMIT, sideboard, banned, not_legal |
-| `src/lib/companion.ts` | All 8 companion deck-building restrictions |
-| `src/lib/rotation.ts` | Rotation warning computation (requires set release date feed) |
-| `src/store/deckStore.ts` | Zustand deck state — add/remove/move/validate on every mutation |
-| `src/components/ValidationPanel.tsx` | Legality UI: rule checklist, copy violations, companion check, color bar |
-| `src/tests/legality.test.ts` | 20 unit tests covering all rules + 5 companions |
+```bash
+npx vercel link      # connect repo to Vercel project
+npx vercel --prod    # deploy to production
+```
 
----
+### Automatic deploys
 
-## Phase 3 — Mana Base Calculator (✅ Complete)
+Connect the GitHub repo in the [Vercel dashboard](https://vercel.com/dashboard). Every push to `main` triggers a production deploy automatically. The `vercel.json` in the repo handles:
+- SPA routing (deep-links don't 404)
+- Immutable cache headers for hashed assets
+- Security headers (X-Frame-Options, X-Content-Type-Options, XSS-Protection)
 
-| File | Purpose |
-|---|---|
-| `src/lib/manaBase.ts` | Pip parser, land count algo, color source recommendation, dual land tiering, curve builder, hypergeometric castability |
-| `src/lib/manaBaseStore.ts` | Zustand async compute store; queries DB for dual land suggestions |
-| `src/components/ManaBasePanel.tsx` | Land count, color sources, dual suggestions, castability warnings |
-| `src/components/ManaCurveChart.tsx` | Stacked SVG histogram with archetype ideal overlay. Props optional — reads from stores when bare |
+## CI
 
----
+GitHub Actions runs on every push to `main` and `feat/electron-and-bug-fixes`, and on all PRs to `main`:
 
-## Phase 4 — Archetype Engine (✅ Complete)
+```
+typecheck → lint → test → build
+```
 
-| File | Purpose |
-|---|---|
-| `src/lib/roles.ts` | Text/keyword → CardRole classifier (17 roles) |
-| `src/lib/archetype.ts` | Role composition + signal-based archetype detection (10 archetypes) |
-| `src/lib/deckComposition.ts` | TrafficLight composition checker vs archetype benchmarks + weak-spot advisor |
-| `src/components/ArchetypePanel.tsx` | Archetype header, signals, role composition grid, weak spots |
+See `.github/workflows/ci.yml`.
 
----
+## Project Structure
 
-## Phase 5 — 3-Panel UI Shell (✅ Complete)
+```
+src/
+├── components/     # React components
+├── lib/            # Pure logic (no React)
+│   ├── __tests__/  # Vitest unit tests
+│   ├── archetype.ts
+│   ├── db.ts           # Dexie schema
+│   ├── manaBase.ts
+│   ├── manaBaseStore.ts
+│   ├── rotation.ts
+│   └── ... (40+ lib files)
+├── workers/        # Web Worker for bulk import
+└── main.tsx
+public/
+└── sw.js           # Service worker
+```
 
-| File | Purpose |
-|---|---|
-| `src/components/CardSearchPanel.tsx` | Search + filters (color, rarity, CMC, sort) with synergy stars |
-| `src/components/DeckPanel.tsx` | Mainboard/sideboard list, inline violations, export .txt |
-| `src/components/DeckStatsBar.tsx` | Compact bar: card count, legality, archetype, avg MV, color pips, violation badge |
-| `src/components/RightPanel.tsx` | 5-tab panel: Curve / Mana / Archetype / Validate / Game Plan |
-| `src/components/CardDetailDrawer.tsx` | Card detail overlay |
-| `src/components/GamePlanSummary.tsx` | Natural-language game plan + stat chips |
-| `src/store/deckStore.ts` | Zustand: add/remove/move/setQuantity/clear/setName + live validation |
+## Known Limitations
 
----
+- **Metagame data** is a bundled snapshot, not a live feed. Updates require a new release.
+- **node_modules** exists in the remote git history (pre-gitignore commit). It does not affect builds or deploys. Clean it with `git filter-repo --path node_modules --invert-paths` if desired.
 
-## Phase 6 — AI Construction Assistant (⚠️ Partial — Unaudited)
+## License
 
-Files committed but not yet audited for correctness or wiring:
-
-`buildWizard.ts`, `budgetOptimizer.ts`, `comboFinder.ts`, `optimizeEngine.ts`,  
-`powerScore.ts`, `powerSignal.ts`, `similarCards.ts`, `suggestions.ts`, `whatsMissing.ts`,  
-`AdvisorPanel.tsx`, `SuggestionPanel.tsx`
-
----
-
-## Open Issues
-
-| Issue | Status |
-|---|---|
-| `rotation.ts` — `setReleaseDates` map never populated | ⚠️ Needs wiring to `db.cardSets` |
-| Python implementation (`main.py`, `core/`, `ui/`) — no docs or decision | ❌ Needs decision: document, branch, or delete |
-| Ph6 files need audit pass | ❌ In queue |
-| `manaBaseStore.compute()` always passes `archetypeProfile = "midrange"` | ⚠️ Should read from detected archetype |
-
----
-
-## Standard Legality Rules Implemented
-
-- Minimum 60 mainboard cards
-- Maximum 4 copies per card (by oracle ID; basic lands exempt)
-- All cards must be `legal` in Standard (`legalities.standard === "legal"`)
-- Banned cards flagged separately
-- Sideboard: exactly 0 or 15 cards
-- Companion deck-building restrictions: Lurrus, Yorion, Kaheera, Obosh, Umori, Gyruda, Jegantha, Zirda
-- Rotation warnings for sets ≥18 months old when next rotation is ≤90 days away
-
----
-
-## Tech Stack
-
-- **React 18** + **TypeScript**
-- **Vite** (build + dev server)
-- **Dexie 3** (IndexedDB ORM)
-- **Tailwind CSS v4**
-- **Zustand** (deck state + mana base store)
-- **Vitest** (unit tests)
-- **Playwright** (E2E — Phase 10)
-
----
-
-## Card Data Attribution
-
-Card data provided by [Scryfall](https://scryfall.com) under their
-[non-commercial use policy](https://scryfall.com/docs/api/bulk-data).  
-Magic: The Gathering card images © Wizards of the Coast.  
-This project is not affiliated with or endorsed by Wizards of the Coast.
+MIT
