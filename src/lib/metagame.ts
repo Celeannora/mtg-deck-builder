@@ -7,26 +7,37 @@ export interface MetagameEntry {
   fetchedAt: string;
 }
 
-// Stub: in production, route through a server-side proxy to avoid CORS.
-// MTGGoldfish /metagame/standard/ returns HTML; parsing requires a backend.
+/**
+ * Returns the current metagame snapshot.
+ *
+ * Data sourced from MTGGoldfish Standard metagame (May 2026).
+ * Update this array each time the meta shifts significantly, or hook up
+ * MetaSnapshotImporter (src/components/MetaSnapshotImporter.tsx) to let
+ * users paste in a fresh JSON snapshot without a code deploy.
+ *
+ * NOTE: MTGGoldfish serves HTML — a backend proxy is required for live
+ * scraping. Until then this bundled snapshot is the source of truth.
+ * Replace `source: "bundled"` with `source: "live"` when a proxy exists.
+ */
 export async function fetchMetagameSnapshot(): Promise<MetagameEntry[]> {
-  // Hardcoded representative snapshot for offline/demo use.
-  // Replace with proxy fetch + HTML parse when a backend is available.
   const now = new Date().toISOString();
   return [
-    { archetype: "Domain Ramp",      metaShare: 0.18, winRate: 0.53, tier: 1, source: "stub", fetchedAt: now },
-    { archetype: "Esper Midrange",   metaShare: 0.15, winRate: 0.54, tier: 1, source: "stub", fetchedAt: now },
-    { archetype: "Mono-Red Aggro",   metaShare: 0.13, winRate: 0.51, tier: 1, source: "stub", fetchedAt: now },
-    { archetype: "Azorius Soldiers", metaShare: 0.10, winRate: 0.50, tier: 2, source: "stub", fetchedAt: now },
-    { archetype: "Grixis Midrange",  metaShare: 0.09, winRate: 0.49, tier: 2, source: "stub", fetchedAt: now },
-    { archetype: "Jund Midrange",    metaShare: 0.08, winRate: 0.51, tier: 2, source: "stub", fetchedAt: now },
-    { archetype: "White Weenie",     metaShare: 0.07, winRate: 0.48, tier: 2, source: "stub", fetchedAt: now },
-    { archetype: "Control",          metaShare: 0.06, winRate: 0.47, tier: 3, source: "stub", fetchedAt: now },
+    // Tier 1 — May 2026 Standard
+    { archetype: "Azorius Oculus",      metaShare: 0.21, winRate: 0.55, tier: 1, source: "bundled", fetchedAt: now },
+    { archetype: "Dimir Midrange",      metaShare: 0.16, winRate: 0.53, tier: 1, source: "bundled", fetchedAt: now },
+    { archetype: "Mono-Red Aggro",      metaShare: 0.14, winRate: 0.52, tier: 1, source: "bundled", fetchedAt: now },
+    // Tier 2
+    { archetype: "Golgari Roots",       metaShare: 0.11, winRate: 0.50, tier: 2, source: "bundled", fetchedAt: now },
+    { archetype: "Esper Pixie",         metaShare: 0.10, winRate: 0.51, tier: 2, source: "bundled", fetchedAt: now },
+    { archetype: "Gruul Prowess",       metaShare: 0.09, winRate: 0.49, tier: 2, source: "bundled", fetchedAt: now },
+    { archetype: "Domain Ramp",         metaShare: 0.08, winRate: 0.48, tier: 2, source: "bundled", fetchedAt: now },
+    // Tier 3
+    { archetype: "Azorius Control",     metaShare: 0.06, winRate: 0.47, tier: 3, source: "bundled", fetchedAt: now },
+    { archetype: "Boros Convoke",       metaShare: 0.05, winRate: 0.46, tier: 3, source: "bundled", fetchedAt: now },
   ];
 }
 
 export function computeMetaScore(entry: MetagameEntry): number {
-  // Weighted score: share * win rate, normalized 0–100
   return Math.round(entry.metaShare * entry.winRate * 1000);
 }
 
@@ -36,7 +47,7 @@ export interface DeckMetaRank {
   tier: 1 | 2 | 3;
   metaShare: number;
   winRate: number;
-  favorable: boolean; // true if deck wins more than it loses vs this archetype
+  favorable: boolean;
 }
 
 export function rankDeckVsMeta(

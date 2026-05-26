@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { db } from "./db";
 import type { CardRecord } from "./types";
 import type { DeckEntry } from "./legality";
+import { detectArchetype } from "./archetype";
 import {
   recommendLandCount,
   recommendColorSources,
@@ -24,20 +25,41 @@ export interface ManaBaseAnalysis {
   avgMV: number;
   castabilityWarnings: CastabilityWarning[];
   archetypeProfile: ArchetypeCurveProfile;
+  /** Archetype detected from the deck composition (e.g. "aggro", "midrange", "control") */
+  detectedArchetype: string;
+  /** 0–1 confidence score for the detected archetype */
+  archetypeConfidence: number;
 }
 
 interface ManaBaseState {
   analysis: ManaBaseAnalysis | null;
   loading: boolean;
-  compute: (entries: DeckEntry[], archetypeProfile?: ArchetypeCurveProfile) => Promise<void>;
+  compute: (entries: DeckEntry[]) => Promise<void>;
 }
 
 export const useManaBaseStore = create<ManaBaseState>((set) => ({
   analysis: null,
   loading: false,
 
-  async compute(entries, archetypeProfile = "midrange") {
+  async compute(entries) {
     set({ loading: true });
+
+    // Detect archetype live from deck composition — never hardcode "midrange"
+    const cards = entries.map((e) => e.card);
+    const archetypeResult = detectArchetype(cards);
+    const detectedArchetype = archetypeResult.archetype;
+    const archetypeConfidence = archetypeResult.confidence;
+
+    // Map the detected archetype label to the ArchetypeCurveProfile enum
+    const profileMap: Record<string, ArchetypeCurveProfile> = {
+      aggro: "aggro",
+      midrange: "midrange",
+      control: "control",
+      combo: "combo",
+      ramp: "ramp",
+    };
+    const archetypeProfile: ArchetypeCurveProfile =
+      profileMap[detectedArchetype.toLowerCase()] ?? "midrange";
 
     const landRec = recommendLandCount(entries);
     const totalCards = entries.reduce((s, e) => s + e.quantity, 0);
@@ -91,7 +113,9 @@ export const useManaBaseStore = create<ManaBaseState>((set) => ({
         curve,
         avgMV,
         castabilityWarnings,
-        archetypeProfile
+        archetypeProfile,
+        detectedArchetype,
+        archetypeConfidence,
       }
     });
   }
