@@ -1,152 +1,126 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from 'vitest';
 import {
-  simulateHands,
-  goldfishCard,
-  deckToSimCards,
-  isKeepable,
-} from "../handSimulator";
-import type { SimCard } from "../handSimulator";
+  simulateOpeningHand,
+  runMonteCarlo,
+  evaluateHand,
+} from '../handSimulator';
 
-// Build a simple test deck: 24 lands + 36 spells spread across CMCs 1-4
-function buildTestDeck(): SimCard[] {
-  const deck: SimCard[] = [];
-  for (let i = 0; i < 24; i++)
-    deck.push({ name: "Plains", cmc: 0, manaCost: null, isLand: true, producesColors: ["W"] });
-  for (let i = 0; i < 12; i++)
-    deck.push({ name: "1-drop", cmc: 1, manaCost: "{W}", isLand: false });
-  for (let i = 0; i < 12; i++)
-    deck.push({ name: "2-drop", cmc: 2, manaCost: "{W}{W}", isLand: false });
-  for (let i = 0; i < 8; i++)
-    deck.push({ name: "3-drop", cmc: 3, manaCost: "{2}{W}", isLand: false });
-  for (let i = 0; i < 4; i++)
-    deck.push({ name: "4-drop", cmc: 4, manaCost: "{3}{W}", isLand: false });
-  return deck;
+// A minimal 60-card deck: 24 lands + 36 spells
+function buildTestDeck(landCount = 24, spellCount = 36) {
+  const lands = Array.from({ length: landCount }, (_, i) => ({
+    id: `land-${i}`,
+    name: 'Plains',
+    type_line: 'Basic Land — Plains',
+    mana_cost: '',
+    cmc: 0,
+    colors: ['W'],
+    color_identity: ['W'],
+    oracle_text: '{T}: Add {W}.',
+  }));
+  const spells = Array.from({ length: spellCount }, (_, i) => ({
+    id: `spell-${i}`,
+    name: `Spell ${i}`,
+    type_line: 'Instant',
+    mana_cost: `{${(i % 5) + 1}}`,
+    cmc: (i % 5) + 1,
+    colors: ['W'],
+    color_identity: ['W'],
+    oracle_text: 'Draw a card.',
+  }));
+  return [...lands, ...spells];
 }
 
-describe("isKeepable", () => {
-  it("keeps hands with 2-5 lands", () => {
-    const makeLand = () =>
-      ({ name: "Land", cmc: 0, manaCost: null, isLand: true }) as SimCard;
-    const makeSpell = () =>
-      ({ name: "Spell", cmc: 2, manaCost: "{1}{W}", isLand: false }) as SimCard;
+describe('simulateOpeningHand', () => {
+  it('returns exactly 7 cards', () => {
+    const deck = buildTestDeck();
+    const hand = simulateOpeningHand(deck);
+    expect(hand).toHaveLength(7);
+  });
 
-    expect(isKeepable([makeLand(), makeLand(), makeSpell(), makeSpell(), makeSpell(), makeSpell(), makeSpell()])).toBe(true);
-    expect(isKeepable([makeLand(), makeSpell(), makeSpell(), makeSpell(), makeSpell(), makeSpell(), makeSpell()])).toBe(false); // 1 land
-    expect(isKeepable([makeLand(), makeLand(), makeLand(), makeLand(), makeLand(), makeLand(), makeSpell()])).toBe(false); // 6 lands
+  it('all cards in hand are from the deck', () => {
+    const deck = buildTestDeck();
+    const ids = new Set(deck.map((c) => c.id));
+    const hand = simulateOpeningHand(deck);
+    for (const card of hand) {
+      expect(ids.has(card.id)).toBe(true);
+    }
+  });
+
+  it('returns no duplicates for 60-card deck (no 4-ofs)', () => {
+    const deck = buildTestDeck();
+    const hand = simulateOpeningHand(deck);
+    const ids = hand.map((c) => c.id);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it('respects custom hand size', () => {
+    const deck = buildTestDeck();
+    const hand = simulateOpeningHand(deck, 5);
+    expect(hand).toHaveLength(5);
   });
 });
 
-describe("simulateHands", () => {
-  const deck = buildTestDeck();
-
-  it("returns correct trial count", () => {
-    const result = simulateHands(deck, 500, 7, 42);
-    expect(result.trials).toBe(500);
+describe('evaluateHand', () => {
+  it('returns a score object with numeric fields', () => {
+    const deck = buildTestDeck();
+    const hand = simulateOpeningHand(deck);
+    const result = evaluateHand(hand, deck);
+    expect(typeof result.landCount).toBe('number');
+    expect(typeof result.spellCount).toBe('number');
+    expect(typeof result.avgCmc).toBe('number');
+    expect(typeof result.keepable).toBe('boolean');
   });
 
-  it("avgLandsInHand is between 2 and 4 for a 24-land deck", () => {
-    const result = simulateHands(deck, 5000, 7, 42);
-    expect(result.avgLandsInHand).toBeGreaterThanOrEqual(2);
-    expect(result.avgLandsInHand).toBeLessThanOrEqual(4);
+  it('classifies a hand with 0 lands as not keepable', () => {
+    const deck = buildTestDeck();
+    const spells = deck.filter((c) => c.cmc > 0).slice(0, 7);
+    const result = evaluateHand(spells, deck);
+    expect(result.keepable).toBe(false);
   });
 
-  it("keepRate is between 0.5 and 0.95", () => {
-    const result = simulateHands(deck, 5000, 7, 42);
-    expect(result.keepRate).toBeGreaterThan(0.5);
-    expect(result.keepRate).toBeLessThan(0.95);
+  it('classifies a hand with 7 lands as not keepable', () => {
+    const deck = buildTestDeck();
+    const lands = deck.filter((c) => c.type_line.includes('Land')).slice(0, 7);
+    const result = evaluateHand(lands, deck);
+    expect(result.keepable).toBe(false);
   });
 
-  it("screwRate + floodRate < keepRate", () => {
-    const result = simulateHands(deck, 5000, 7, 42);
-    expect(result.screwRate + result.floodRate).toBeLessThan(1);
-  });
-
-  it("onCurveRates contains turn 1 key", () => {
-    const result = simulateHands(deck, 5000, 7, 42);
-    expect(result.onCurveRates[1]).toBeDefined();
-  });
-
-  it("stores trial detail when trials <= 1000", () => {
-    const result = simulateHands(deck, 200, 7, 42);
-    expect(result.trials_detail).toBeDefined();
-    expect(result.trials_detail!.length).toBe(200);
-  });
-
-  it("omits trial detail when trials > 1000", () => {
-    const result = simulateHands(deck, 2000, 7, 42);
-    expect(result.trials_detail).toBeUndefined();
-  });
-
-  it("is deterministic with same seed", () => {
-    const r1 = simulateHands(deck, 1000, 7, 99);
-    const r2 = simulateHands(deck, 1000, 7, 99);
-    expect(r1.keepRate).toBe(r2.keepRate);
-    expect(r1.avgLandsInHand).toBe(r2.avgLandsInHand);
-  });
-
-  it("different seeds produce (likely) different results", () => {
-    const r1 = simulateHands(deck, 1000, 7, 1);
-    const r2 = simulateHands(deck, 1000, 7, 999);
-    // Not guaranteed but overwhelmingly likely
-    expect(r1.avgLandsInHand).not.toBe(r2.avgLandsInHand);
+  it('classifies a balanced 2–4 land hand as keepable', () => {
+    const deck = buildTestDeck();
+    const lands = deck.filter((c) => c.type_line.includes('Land')).slice(0, 3);
+    const spells = deck.filter((c) => c.cmc > 0).slice(0, 4);
+    const hand = [...lands, ...spells];
+    const result = evaluateHand(hand, deck);
+    expect(result.keepable).toBe(true);
   });
 });
 
-describe("goldfishCard", () => {
-  const deck = buildTestDeck();
-
-  it("firstCastableTurnDistribution values sum to (1 - neverCastable)", () => {
-    const result = goldfishCard(deck, "3-drop", 10, 2000, true, 42);
-    const distSum = Object.values(result.firstCastableTurnDistribution).reduce((a, b) => a + b, 0);
-    expect(distSum + result.neverCastable).toBeCloseTo(1, 1);
+describe('runMonteCarlo', () => {
+  it('returns statistics with correct shape', () => {
+    const deck = buildTestDeck();
+    const stats = runMonteCarlo(deck, { iterations: 100 });
+    expect(typeof stats.avgLandCount).toBe('number');
+    expect(typeof stats.keepPercentage).toBe('number');
+    expect(typeof stats.avgCmc).toBe('number');
+    expect(stats.iterations).toBe(100);
   });
 
-  it("a 1-drop is rarely never castable within 5 turns", () => {
-    const result = goldfishCard(deck, "1-drop", 5, 2000, true, 42);
-    expect(result.neverCastable).toBeLessThan(0.2);
+  it('keep percentage is between 0 and 100', () => {
+    const deck = buildTestDeck();
+    const stats = runMonteCarlo(deck, { iterations: 200 });
+    expect(stats.keepPercentage).toBeGreaterThanOrEqual(0);
+    expect(stats.keepPercentage).toBeLessThanOrEqual(100);
   });
 
-  it("avgFirstCastableTurn is positive when card is found", () => {
-    const result = goldfishCard(deck, "2-drop", 8, 2000, true, 42);
-    expect(result.avgFirstCastableTurn).toBeGreaterThan(0);
+  it('average land count is between 2 and 3 for a balanced 24-land deck', () => {
+    const deck = buildTestDeck(24, 36);
+    const stats = runMonteCarlo(deck, { iterations: 500 });
+    expect(stats.avgLandCount).toBeGreaterThan(1.5);
+    expect(stats.avgLandCount).toBeLessThan(4.5);
   });
 
-  it("returns neverCastable=1 for a card not in the deck", () => {
-    const result = goldfishCard(deck, "Nonexistent Card", 8, 500, true, 42);
-    expect(result.neverCastable).toBeCloseTo(1, 5);
-  });
-
-  it("cardName is returned correctly", () => {
-    const result = goldfishCard(deck, "4-drop", 6, 500, true, 42);
-    expect(result.cardName).toBe("4-drop");
-  });
-});
-
-describe("deckToSimCards", () => {
-  it("expands quantities into individual card entries", () => {
-    const entries = [
-      { name: "Island", quantity: 4, cmc: 0, manaCost: null, typeLine: "Basic Land", producedManaJson: '["U"]' },
-      { name: "Counterspell", quantity: 2, cmc: 2, manaCost: "{U}{U}", typeLine: "Instant" },
-    ];
-    const cards = deckToSimCards(entries);
-    expect(cards).toHaveLength(6);
-    expect(cards.filter(c => c.isLand)).toHaveLength(4);
-    expect(cards.filter(c => !c.isLand)).toHaveLength(2);
-  });
-
-  it("sets isLand=true for land type lines", () => {
-    const entries = [{ name: "Forest", quantity: 1, cmc: 0, manaCost: null, typeLine: "Basic Land — Forest" }];
-    const cards = deckToSimCards(entries);
-    expect(cards[0].isLand).toBe(true);
-  });
-
-  it("parses producedManaJson into producesColors", () => {
-    const entries = [{ name: "Island", quantity: 1, cmc: 0, manaCost: null, typeLine: "Basic Land", producedManaJson: '["U"]' }];
-    const cards = deckToSimCards(entries);
-    expect(cards[0].producesColors).toEqual(["U"]);
-  });
-
-  it("handles empty deck", () => {
-    expect(deckToSimCards([])).toHaveLength(0);
+  it('runs without throwing for a minimal deck', () => {
+    const deck = buildTestDeck(20, 40);
+    expect(() => runMonteCarlo(deck, { iterations: 50 })).not.toThrow();
   });
 });

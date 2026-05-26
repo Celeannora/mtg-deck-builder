@@ -1,110 +1,117 @@
-import { describe, it, expect } from "vitest";
-import { buildConsistencyReport } from "../consistencyReport";
-import type { DeckEntry } from "../consistencyReport";
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import {
+  generateConsistencyReport,
+  scoreConsistency,
+  ConsistencyReport,
+} from '../consistencyReport';
 
-function makeAggroDeck(): DeckEntry[] {
-  return [
-    { name: "Plains", quantity: 22, cmc: 0, manaCost: null, typeLine: "Basic Land — Plains", producedManaJson: '["W"]' },
-    { name: "Savannah Lions", quantity: 4, cmc: 1, manaCost: "{W}", typeLine: "Creature" },
-    { name: "Knight of the White Orchid", quantity: 4, cmc: 2, manaCost: "{W}{W}", typeLine: "Creature" },
-    { name: "Glorious Anthem", quantity: 4, cmc: 3, manaCost: "{1}{W}{W}", typeLine: "Enchantment" },
-    { name: "Baneslayer Angel", quantity: 4, cmc: 5, manaCost: "{3}{W}{W}", typeLine: "Creature" },
-    { name: "Wrath of God", quantity: 4, cmc: 4, manaCost: "{2}{W}{W}", typeLine: "Sorcery" },
-    // Pad to 60
-    { name: "Elite Vanguard", quantity: 8, cmc: 1, manaCost: "{W}", typeLine: "Creature" },
-    { name: "Honor of the Pure", quantity: 4, cmc: 2, manaCost: "{1}{W}", typeLine: "Enchantment" },
-    { name: "Path to Exile", quantity: 6, cmc: 1, manaCost: "{W}", typeLine: "Instant" },
+// Minimal card factory
+const makeCard = (overrides: Record<string, unknown> = {}) => ({
+  id: `card-${Math.random()}`,
+  name: 'Test Card',
+  type_line: 'Instant',
+  mana_cost: '{2}{U}',
+  cmc: 3,
+  colors: ['U'],
+  color_identity: ['U'],
+  oracle_text: '',
+  ...overrides,
+});
+
+const makeLand = (overrides: Record<string, unknown> = {}) =>
+  makeCard({
+    name: 'Island',
+    type_line: 'Basic Land — Island',
+    mana_cost: '',
+    cmc: 0,
+    oracle_text: '{T}: Add {U}.',
+    ...overrides,
+  });
+
+function buildDeck(landCount = 24, spellCount = 36) {
+  const entries = [
+    ...Array.from({ length: landCount }, () => ({ card: makeLand(), quantity: 1 })),
+    ...Array.from({ length: spellCount }, (_, i) => ({
+      card: makeCard({ cmc: (i % 5) + 1 }),
+      quantity: 1,
+    })),
   ];
+  return entries;
 }
 
-describe("buildConsistencyReport", () => {
-  it("returns correct deckSize, landCount, nonLandCount", () => {
-    const deck = makeAggroDeck();
-    const report = buildConsistencyReport(deck, 500);
-    expect(report.deckSize).toBe(60);
-    expect(report.landCount).toBe(22);
-    expect(report.nonLandCount).toBe(38);
+describe('generateConsistencyReport', () => {
+  it('returns a report object with required fields', () => {
+    const deck = buildDeck();
+    const report: ConsistencyReport = generateConsistencyReport(deck);
+    expect(report).toHaveProperty('landRatio');
+    expect(report).toHaveProperty('avgCmc');
+    expect(report).toHaveProperty('consistencyScore');
+    expect(report).toHaveProperty('warnings');
+    expect(Array.isArray(report.warnings)).toBe(true);
   });
 
-  it("avgManaValue is positive", () => {
-    const report = buildConsistencyReport(makeAggroDeck(), 500);
-    expect(report.avgManaValue).toBeGreaterThan(0);
+  it('land ratio is between 0 and 1', () => {
+    const deck = buildDeck();
+    const report = generateConsistencyReport(deck);
+    expect(report.landRatio).toBeGreaterThan(0);
+    expect(report.landRatio).toBeLessThanOrEqual(1);
   });
 
-  it("handStats is populated", () => {
-    const report = buildConsistencyReport(makeAggroDeck(), 500);
-    expect(report.handStats.trials).toBe(500);
-    expect(report.handStats.keepRate).toBeGreaterThan(0);
+  it('warns when land count is too low', () => {
+    const deck = buildDeck(10, 50);
+    const report = generateConsistencyReport(deck);
+    const hasLandWarning = report.warnings.some((w: string) =>
+      w.toLowerCase().includes('land'));
+    expect(hasLandWarning).toBe(true);
   });
 
-  it("castabilityRows has one entry per unique nonland card", () => {
-    const deck = makeAggroDeck();
-    const uniqueNonlands = deck.filter(e => !e.typeLine.toLowerCase().includes("land")).length;
-    const report = buildConsistencyReport(deck, 200);
-    expect(report.castabilityRows).toHaveLength(uniqueNonlands);
+  it('warns when land count is too high', () => {
+    const deck = buildDeck(40, 20);
+    const report = generateConsistencyReport(deck);
+    const hasLandWarning = report.warnings.some((w: string) =>
+      w.toLowerCase().includes('land'));
+    expect(hasLandWarning).toBe(true);
   });
 
-  it("castabilityRows are sorted by CMC ascending", () => {
-    const report = buildConsistencyReport(makeAggroDeck(), 200);
-    for (let i = 1; i < report.castabilityRows.length; i++) {
-      expect(report.castabilityRows[i].cmc).toBeGreaterThanOrEqual(
-        report.castabilityRows[i - 1].cmc
-      );
-    }
+  it('produces no warnings for a balanced deck', () => {
+    const deck = buildDeck(24, 36);
+    const report = generateConsistencyReport(deck);
+    expect(report.warnings.length).toBe(0);
   });
 
-  it("flaggedCards is a subset of castabilityRows", () => {
-    const report = buildConsistencyReport(makeAggroDeck(), 200);
-    for (const flagged of report.flaggedCards) {
-      expect(report.castabilityRows.some(r => r.cardName === flagged.cardName)).toBe(true);
-    }
-  });
-
-  it("flagged cards have warning text", () => {
-    const report = buildConsistencyReport(makeAggroDeck(), 200);
-    for (const flagged of report.flaggedCards) {
-      expect(flagged.warning).toBeDefined();
-      expect(flagged.warning!.length).toBeGreaterThan(0);
-    }
-  });
-
-  it("grade is a valid letter grade", () => {
-    const report = buildConsistencyReport(makeAggroDeck(), 500);
-    expect(["A", "B", "C", "D", "F"]).toContain(report.grade);
-  });
-
-  it("summary is a non-empty string", () => {
-    const report = buildConsistencyReport(makeAggroDeck(), 200);
-    expect(typeof report.summary).toBe("string");
-    expect(report.summary.length).toBeGreaterThan(10);
-  });
-
-  it("manaWarnings fire when sources are too low", () => {
-    // Deck with zero lands that produce U, but spells need U
-    const deck: DeckEntry[] = [
-      { name: "Island", quantity: 2, cmc: 0, manaCost: null, typeLine: "Basic Land", producedManaJson: '["U"]' },
-      { name: "Mountain", quantity: 22, cmc: 0, manaCost: null, typeLine: "Basic Land", producedManaJson: '["R"]' },
-      { name: "Counterspell", quantity: 36, cmc: 2, manaCost: "{U}{U}", typeLine: "Instant" },
+  it('avgCmc reflects the cards in the deck', () => {
+    // All spells at cmc 2
+    const deck = [
+      ...Array.from({ length: 24 }, () => ({ card: makeLand(), quantity: 1 })),
+      ...Array.from({ length: 36 }, () => ({ card: makeCard({ cmc: 2 }), quantity: 1 })),
     ];
-    const report = buildConsistencyReport(deck, 200);
-    expect(report.manaWarnings.length).toBeGreaterThan(0);
-    expect(report.manaWarnings[0].color).toBe("U");
+    const report = generateConsistencyReport(deck);
+    // Avg cmc of non-land cards should be exactly 2
+    expect(report.avgCmc).toBeCloseTo(2, 1);
+  });
+});
+
+describe('scoreConsistency', () => {
+  it('returns a number between 0 and 100', () => {
+    const deck = buildDeck();
+    const score = scoreConsistency(deck);
+    expect(score).toBeGreaterThanOrEqual(0);
+    expect(score).toBeLessThanOrEqual(100);
   });
 
-  it("no manaWarnings for a well-built mono-white deck", () => {
-    const deck: DeckEntry[] = [
-      { name: "Plains", quantity: 24, cmc: 0, manaCost: null, typeLine: "Basic Land", producedManaJson: '["W"]' },
-      { name: "Soldier", quantity: 36, cmc: 2, manaCost: "{W}{W}", typeLine: "Creature" },
-    ];
-    const report = buildConsistencyReport(deck, 200);
-    expect(report.manaWarnings).toHaveLength(0);
+  it('a balanced deck scores higher than a mana-flooded one', () => {
+    const balanced = buildDeck(24, 36);
+    const flooded = buildDeck(40, 20);
+    expect(scoreConsistency(balanced)).toBeGreaterThan(scoreConsistency(flooded));
   });
 
-  it("byTurn array on each row has entries for turns 1 through N", () => {
-    const report = buildConsistencyReport(makeAggroDeck(), 200);
-    for (const row of report.castabilityRows) {
-      expect(row.byTurn.length).toBeGreaterThan(0);
-      expect(row.byTurn[0].turn).toBe(1);
-    }
+  it('a balanced deck scores higher than a mana-starved one', () => {
+    const balanced = buildDeck(24, 36);
+    const starved = buildDeck(10, 50);
+    expect(scoreConsistency(balanced)).toBeGreaterThan(scoreConsistency(starved));
+  });
+
+  it('does not throw for an empty deck', () => {
+    expect(() => scoreConsistency([])).not.toThrow();
   });
 });
