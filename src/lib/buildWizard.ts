@@ -113,17 +113,14 @@ async function buildManaBase(
   candidates: CardRecord[]
 ): Promise<DeckEntry[]> {
   let result = [...entries];
-  const nonLandEntries = result.filter(
+  const mainNonLand = result.filter(
     (e) => e.board === "main" && !e.card.typeLine.includes("Land")
   );
-  const totalNonLand = nonLandEntries.reduce((s, e) => s + e.quantity, 0);
-  const avgCmc =
-    totalNonLand > 0
-      ? nonLandEntries.reduce((s, e) => s + e.card.cmc * e.quantity, 0) / totalNonLand
-      : 2.5;
 
-  const landCount = recommendLandCount(avgCmc, 0, 0);
-  const target = Math.round(landCount);
+  // Pass the real entries to recommendLandCount so it can use curve/archetype data
+  const landRec = recommendLandCount(mainNonLand);
+  const target = landRec.recommended;
+
   const currentLands = result
     .filter((e) => e.board === "main" && e.card.typeLine.includes("Land"))
     .reduce((s, e) => s + e.quantity, 0);
