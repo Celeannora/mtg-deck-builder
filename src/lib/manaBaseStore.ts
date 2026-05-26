@@ -15,6 +15,24 @@ import {
   type CastabilityWarning,
   type ArchetypeCurveProfile
 } from "./manaBase";
+import { detectArchetype } from "./archetype";
+
+// Map archetype detection result to the ArchetypeCurveProfile expected by manaBase
+function toArchetypeCurveProfile(arch: string): ArchetypeCurveProfile {
+  switch (arch) {
+    case "Aggro":     return "aggro";
+    case "Burn":      return "aggro";  // Burn is an aggro-style curve
+    case "Control":   return "control";
+    case "Ramp":      return "ramp";
+    case "Combo":     return "combo";
+    case "Midrange":  return "midrange";
+    case "Tempo":     return "midrange"; // Tempo sits between aggro/midrange
+    case "Tokens":    return "midrange";
+    case "Graveyard": return "midrange";
+    case "Sacrifice": return "midrange";
+    default:          return "midrange";
+  }
+}
 
 export interface ManaBaseAnalysis {
   landRec: LandRecommendation;
@@ -24,11 +42,15 @@ export interface ManaBaseAnalysis {
   avgMV: number;
   castabilityWarnings: CastabilityWarning[];
   archetypeProfile: ArchetypeCurveProfile;
+  detectedArchetype: string;
+  archetypeConfidence: number;
+  archetypeSignals: string[];
 }
 
 interface ManaBaseState {
   analysis: ManaBaseAnalysis | null;
   loading: boolean;
+  // archetypeProfile is now optional — if omitted, it is auto-detected from entries
   compute: (entries: DeckEntry[], archetypeProfile?: ArchetypeCurveProfile) => Promise<void>;
 }
 
@@ -36,8 +58,13 @@ export const useManaBaseStore = create<ManaBaseState>((set) => ({
   analysis: null,
   loading: false,
 
-  async compute(entries, archetypeProfile = "midrange") {
+  async compute(entries, archetypeProfile) {
     set({ loading: true });
+
+    // Auto-detect archetype from the deck if no explicit profile is provided
+    const detection = detectArchetype(entries);
+    const resolvedProfile: ArchetypeCurveProfile =
+      archetypeProfile ?? toArchetypeCurveProfile(detection.archetype);
 
     const landRec = recommendLandCount(entries);
     const totalCards = entries.reduce((s, e) => s + e.quantity, 0);
@@ -91,7 +118,10 @@ export const useManaBaseStore = create<ManaBaseState>((set) => ({
         curve,
         avgMV,
         castabilityWarnings,
-        archetypeProfile
+        archetypeProfile: resolvedProfile,
+        detectedArchetype: detection.archetype,
+        archetypeConfidence: detection.confidence,
+        archetypeSignals: detection.signals,
       }
     });
   }
