@@ -179,9 +179,12 @@ export default function App() {
   const stableHandlers = useCallback(() => handlersRef.current, [])();
   useKeyboardShortcuts(stableHandlers);
 
+  // Intentionally mount-only: decode share link once on initial load.
+  // loadFromSnapshot is a stable Zustand action reference.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     const decoded = decodeShareableLink(window.location.hash);
-    if (decoded) loadFromSnapshot(decoded);
+    if (decoded) void loadFromSnapshot(decoded);
   }, []);
 
   useEffect(() => {
