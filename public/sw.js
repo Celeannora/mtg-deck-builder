@@ -1,9 +1,11 @@
-const CACHE_NAME = "mtg-builder-v1";
+// Cache version with timestamp - guaranteed to be unique on each registration
+// This ensures old cached content is never served after updates
+const CACHE_VERSION = `mtg-builder-v${self.registration ? self.registration.scope : 'fallback'}-${Date.now()}`;
 const PRECACHE = ["/", "/manifest.webmanifest"];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(PRECACHE))
+    caches.open(CACHE_VERSION).then((cache) => cache.addAll(PRECACHE))
   );
   self.skipWaiting();
 });
@@ -11,7 +13,8 @@ self.addEventListener("install", (event) => {
 self.addEventListener("activate", (event) => {
   event.waitUntil(
     caches.keys().then((keys) =>
-      Promise.all(keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k)))
+      // Delete ALL old caches, not just ones that don't match current version
+      Promise.all(keys.map((k) => caches.delete(k)))
     )
   );
   self.clients.claim();
@@ -21,24 +24,21 @@ self.addEventListener("fetch", (event) => {
   const { request } = event;
   const url = new URL(request.url);
 
-  // Network-first for Scryfall API calls
-  if (url.hostname.includes("scryfall.com")) {
-    event.respondWith(
-      fetch(request)
-        .then((res) => { const clone = res.clone(); caches.open(CACHE_NAME).then((c) => c.put(request, clone)); return res; })
-        .catch(() => caches.match(request))
-    );
-    return;
-  }
-
-  // Cache-first for static assets
+  // Network-first for everything - ensures fresh content on every request
+  // This is critical for dev server where files change frequently
   event.respondWith(
-    caches.match(request).then((cached) =>
-      cached ?? fetch(request).then((res) => {
-        const clone = res.clone();
-        caches.open(CACHE_NAME).then((c) => c.put(request, clone));
+    fetch(request)
+      .then((res) => {
+        // Clone and cache successful responses
+        if (res.ok) {
+          const clone = res.clone();
+          caches.open(CACHE_VERSION).then((c) => c.put(request, clone));
+        }
         return res;
       })
-    )
+      .catch(() => {
+        // Network failed - try cache as fallback (offline support)
+        return caches.match(request);
+      })
   );
 });
